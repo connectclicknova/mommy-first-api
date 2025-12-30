@@ -3,87 +3,217 @@ const router = express.Router();
 const storefrontAPI = require("../config/shopify");
 const verifyToken = require("../middleware/auth");
 
-// GET all products from Shopify Storefront API (Protected)
-router.get("/", verifyToken, async (req, res) => {
+// GET products with pagination and collection filtering (Protected)
+// Supports: /products, /products/pg-1, /products/pg-2?cid=collection-name
+router.get(["/", "/pg-:page"], verifyToken, async (req, res) => {
   try {
-    // GraphQL query to fetch products
-    const query = `
-      {
-        products(first: 50) {
-          edges {
-            node {
-              id
-              title
-              description
-              handle
-              productType
-              vendor
-              tags
-              createdAt
-              updatedAt
-              images(first: 5) {
-                edges {
-                  node {
-                    id
-                    url
-                    altText
-                    width
-                    height
+    const page = parseInt(req.params.page) || 1; // Default to page 1
+    const productsPerPage = 16;
+    const { cid } = req.query; // Collection ID from query params
+
+    let query;
+
+    if (cid) {
+      // Fetch products from a specific collection with pagination
+      const collectionQuery = `
+        {
+          collection(handle: "${cid}") {
+            id
+            title
+            handle
+            products(first: ${productsPerPage}) {
+              edges {
+                cursor
+                node {
+                  id
+                  title
+                  description
+                  handle
+                  productType
+                  vendor
+                  tags
+                  createdAt
+                  updatedAt
+                  images(first: 5) {
+                    edges {
+                      node {
+                        id
+                        url
+                        altText
+                        width
+                        height
+                      }
+                    }
                   }
-                }
-              }
-              variants(first: 10) {
-                edges {
-                  node {
-                    id
-                    title
-                    price {
+                  variants(first: 10) {
+                    edges {
+                      node {
+                        id
+                        title
+                        price {
+                          amount
+                          currencyCode
+                        }
+                        compareAtPrice {
+                          amount
+                          currencyCode
+                        }
+                        availableForSale
+                        quantityAvailable
+                        selectedOptions {
+                          name
+                          value
+                        }
+                        image {
+                          url
+                          altText
+                        }
+                      }
+                    }
+                  }
+                  priceRange {
+                    minVariantPrice {
                       amount
                       currencyCode
                     }
-                    compareAtPrice {
+                    maxVariantPrice {
                       amount
                       currencyCode
                     }
-                    availableForSale
-                    quantityAvailable
-                    selectedOptions {
-                      name
-                      value
-                    }
-                    image {
-                      url
-                      altText
-                    }
                   }
+                  availableForSale
                 }
               }
-              priceRange {
-                minVariantPrice {
-                  amount
-                  currencyCode
-                }
-                maxVariantPrice {
-                  amount
-                  currencyCode
-                }
+              pageInfo {
+                hasNextPage
+                hasPreviousPage
               }
-              availableForSale
             }
           }
         }
+      `;
+
+      // For page > 1, we need to fetch all products and slice
+      // Note: In production, you'd want to use cursor-based pagination
+      const response = await storefrontAPI.post("", { query: collectionQuery });
+      
+      if (!response.data.data.collection) {
+        return res.status(404).json({
+          success: false,
+          message: `Collection '${cid}' not found`,
+        });
       }
-    `;
 
-    const response = await storefrontAPI.post("", { query });
+      const allProducts = response.data.data.collection.products.edges.map(edge => edge.node);
+      const startIndex = (page - 1) * productsPerPage;
+      const endIndex = startIndex + productsPerPage;
+      const products = allProducts.slice(startIndex, endIndex);
+      const hasNextPage = endIndex < allProducts.length;
 
-    const products = response.data.data.products.edges.map(edge => edge.node);
+      return res.status(200).json({
+        success: true,
+        page: page,
+        productsPerPage: productsPerPage,
+        count: products.length,
+        totalCount: allProducts.length,
+        hasNextPage: hasNextPage,
+        collectionId: cid,
+        collectionTitle: response.data.data.collection.title,
+        products: products,
+      });
+    } else {
+      // Fetch all products with pagination
+      query = `
+        {
+          products(first: ${productsPerPage * page}) {
+            edges {
+              cursor
+              node {
+                id
+                title
+                description
+                handle
+                productType
+                vendor
+                tags
+                createdAt
+                updatedAt
+                images(first: 5) {
+                  edges {
+                    node {
+                      id
+                      url
+                      altText
+                      width
+                      height
+                    }
+                  }
+                }
+                variants(first: 10) {
+                  edges {
+                    node {
+                      id
+                      title
+                      price {
+                        amount
+                        currencyCode
+                      }
+                      compareAtPrice {
+                        amount
+                        currencyCode
+                      }
+                      availableForSale
+                      quantityAvailable
+                      selectedOptions {
+                        name
+                        value
+                      }
+                      image {
+                        url
+                        altText
+                      }
+                    }
+                  }
+                }
+                priceRange {
+                  minVariantPrice {
+                    amount
+                    currencyCode
+                  }
+                  maxVariantPrice {
+                    amount
+                    currencyCode
+                  }
+                }
+                availableForSale
+              }
+            }
+            pageInfo {
+              hasNextPage
+              hasPreviousPage
+            }
+          }
+        }
+      `;
 
-    res.status(200).json({
-      success: true,
-      count: products.length,
-      products: products,
-    });
+      const response = await storefrontAPI.post("", { query });
+      const allProducts = response.data.data.products.edges.map(edge => edge.node);
+      
+      // Slice products for the requested page
+      const startIndex = (page - 1) * productsPerPage;
+      const endIndex = startIndex + productsPerPage;
+      const products = allProducts.slice(startIndex, endIndex);
+      const hasNextPage = response.data.data.products.pageInfo.hasNextPage || endIndex < allProducts.length;
+
+      return res.status(200).json({
+        success: true,
+        page: page,
+        productsPerPage: productsPerPage,
+        count: products.length,
+        hasNextPage: hasNextPage,
+        products: products,
+      });
+    }
   } catch (error) {
     console.error("Error fetching products:", error.response?.data || error.message);
     res.status(500).json({
