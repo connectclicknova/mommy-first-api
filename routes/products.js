@@ -3,6 +3,30 @@ const router = express.Router();
 const storefrontAPI = require("../config/shopify");
 const verifyToken = require("../middleware/auth");
 
+// Helper function to get total product count
+async function getTotalProductCount() {
+  try {
+    const countQuery = `
+      {
+        products(first: 1) {
+          edges {
+            node {
+              id
+            }
+          }
+        }
+      }
+    `;
+    const response = await storefrontAPI.post("", { query: countQuery });
+    // Note: Shopify doesn't provide direct count, so we estimate based on available data
+    // For accurate count, you may need to implement caching or use Shopify Admin API
+    return null; // Will be calculated differently per route
+  } catch (error) {
+    console.error("Error getting product count:", error.message);
+    return null;
+  }
+}
+
 // GET products with pagination and collection filtering (Protected)
 // Supports: /products, /products/pg-1, /products/pg-2?cid=collection-name
 router.get(["/", "/pg-:page"], verifyToken, async (req, res) => {
@@ -21,7 +45,7 @@ router.get(["/", "/pg-:page"], verifyToken, async (req, res) => {
             id
             title
             handle
-            products(first: ${productsPerPage}) {
+            products(first: 250) {
               edges {
                 cursor
                 node {
@@ -115,6 +139,7 @@ router.get(["/", "/pg-:page"], verifyToken, async (req, res) => {
         page: page,
         productsPerPage: productsPerPage,
         count: products.length,
+        totalProductCount: allProducts.length,
         totalCount: allProducts.length,
         hasNextPage: hasNextPage,
         collectionId: cid,
@@ -125,7 +150,7 @@ router.get(["/", "/pg-:page"], verifyToken, async (req, res) => {
       // Fetch all products with pagination
       query = `
         {
-          products(first: ${productsPerPage * page}) {
+          products(first: 250) {
             edges {
               cursor
               node {
@@ -210,6 +235,7 @@ router.get(["/", "/pg-:page"], verifyToken, async (req, res) => {
         page: page,
         productsPerPage: productsPerPage,
         count: products.length,
+        totalProductCount: allProducts.length,
         hasNextPage: hasNextPage,
         products: products,
       });
@@ -239,7 +265,7 @@ router.get("/search", verifyToken, async (req, res) => {
     // GraphQL query to search products
     const query = `
       {
-        products(first: 50, query: "${q}") {
+        products(first: 250, query: "${q}") {
           edges {
             node {
               id
@@ -312,6 +338,7 @@ router.get("/search", verifyToken, async (req, res) => {
     res.status(200).json({
       success: true,
       count: products.length,
+      totalProductCount: products.length,
       searchQuery: q,
       products: products,
     });
