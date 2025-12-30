@@ -1,18 +1,90 @@
 const express = require("express");
 const router = express.Router();
-const shopify = require("../config/shopify");
+const storefrontAPI = require("../config/shopify");
 
-// GET all products
+// GET all products from Shopify Storefront API
 router.get("/", async (req, res) => {
   try {
-    const response = await shopify.get("/products.json");
+    // GraphQL query to fetch products
+    const query = `
+      {
+        products(first: 50) {
+          edges {
+            node {
+              id
+              title
+              description
+              handle
+              productType
+              vendor
+              tags
+              createdAt
+              updatedAt
+              images(first: 5) {
+                edges {
+                  node {
+                    id
+                    url
+                    altText
+                    width
+                    height
+                  }
+                }
+              }
+              variants(first: 10) {
+                edges {
+                  node {
+                    id
+                    title
+                    price {
+                      amount
+                      currencyCode
+                    }
+                    compareAtPrice {
+                      amount
+                      currencyCode
+                    }
+                    availableForSale
+                    quantityAvailable
+                    selectedOptions {
+                      name
+                      value
+                    }
+                    image {
+                      url
+                      altText
+                    }
+                  }
+                }
+              }
+              priceRange {
+                minVariantPrice {
+                  amount
+                  currencyCode
+                }
+                maxVariantPrice {
+                  amount
+                  currencyCode
+                }
+              }
+              availableForSale
+            }
+          }
+        }
+      }
+    `;
+
+    const response = await storefrontAPI.post("", { query });
+
+    const products = response.data.data.products.edges.map(edge => edge.node);
 
     res.status(200).json({
       success: true,
-      count: response.data.products.length,
-      products: response.data.products,
+      count: products.length,
+      products: products,
     });
   } catch (error) {
+    console.error("Error fetching products:", error.response?.data || error.message);
     res.status(500).json({
       success: false,
       message: "Failed to fetch products",

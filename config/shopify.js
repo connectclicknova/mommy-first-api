@@ -1,11 +1,12 @@
 const axios = require("axios");
 
-const shopify = axios.create({
-  baseURL: `https://${process.env.SHOPIFY_STORE_URL}/admin/api/2024-01`,
+// Shopify Storefront API configuration
+const storefrontAPI = axios.create({
+  baseURL: `https://${process.env.SHOPIFY_STORE_URL}/api/2025-01/graphql.json`,
   headers: {
-    "X-Shopify-Access-Token": process.env.SHOPIFY_ACCESS_TOKEN,
+    "X-Shopify-Storefront-Access-Token": process.env.SHOPIFY_ACCESS_TOKEN,
     "Content-Type": "application/json",
   },
 });
 
-module.exports = shopify;
+module.exports = storefrontAPI;
