@@ -1,41 +1,58 @@
 const express = require("express");
 const router = express.Router();
-const jwt = require("jsonwebtoken");
+const TokenManager = require("../utils/tokenManager");
 
-// Generate authentication token
+// Generate or retrieve cached authentication token
 router.post("/token", (req, res) => {
   const { clientId, clientSecret } = req.body;
-
-  // Debug logging
-  console.log("Received clientId:", clientId);
-  console.log("Expected clientId:", process.env.CLIENT_ID);
-  console.log("Received clientSecret:", clientSecret);
-  console.log("Expected clientSecret:", process.env.CLIENT_SECRET);
 
   // Validate credentials against environment variables
   if (
     clientId === process.env.CLIENT_ID &&
     clientSecret === process.env.CLIENT_SECRET
   ) {
-    // Generate JWT token
-    const token = jwt.sign(
-      {
-        clientId: clientId,
-        authorized: true,
-      },
-      process.env.JWT_SECRET,
-      { expiresIn: "24h" } // Token expires in 24 hours
-    );
+    // Get token (cached or new)
+    const tokenData = TokenManager.getToken(clientId);
 
     return res.status(200).json({
       success: true,
-      token: token,
-      expiresIn: "24h",
+      token: tokenData.token,
+      expiresIn: tokenData.expiresIn,
+      cached: tokenData.cached,
+      message: tokenData.cached
+        ? "Returning existing valid token"
+        : "New token generated",
     });
   } else {
     return res.status(401).json({
       success: false,
       message: "Invalid client credentials",
+    });
+  }
+});
+
+// Optional: Endpoint to invalidate token (logout)
+router.post("/logout", (req, res) => {
+  const { clientId } = req.body;
+
+  if (!clientId) {
+    return res.status(400).json({
+      success: false,
+      message: "clientId is required",
+    });
+  }
+
+  const invalidated = TokenManager.invalidateToken(clientId);
+
+  if (invalidated) {
+    return res.status(200).json({
+      success: true,
+      message: "Token invalidated successfully",
+    });
+  } else {
+    return res.status(404).json({
+      success: false,
+      message: "No active token found for this client",
     });
   }
 });
