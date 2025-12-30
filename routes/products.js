@@ -1,9 +1,10 @@
 const express = require("express");
 const router = express.Router();
 const storefrontAPI = require("../config/shopify");
+const verifyToken = require("../middleware/auth");
 
-// GET all products from Shopify Storefront API
-router.get("/", async (req, res) => {
+// GET all products from Shopify Storefront API (Protected)
+router.get("/", verifyToken, async (req, res) => {
   try {
     // GraphQL query to fetch products
     const query = `

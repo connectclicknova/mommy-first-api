@@ -3,6 +3,7 @@ const express = require("express");
 const app = express();
 const PORT = 3000;
 const productRoutes = require("./routes/products");
+const authRoutes = require("./routes/auth");
 
 // Middleware
 app.use(express.json());
@@ -12,6 +13,8 @@ app.get("/", (req, res) => {
   res.send("Hello from Express!");
 });
 
+// Routes
+app.use("/auth", authRoutes);
 app.use("/products", productRoutes);
 
 // Start server
