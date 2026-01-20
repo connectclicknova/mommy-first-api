@@ -4,6 +4,7 @@ const app = express();
 const PORT = 3000;
 const productRoutes = require("./routes/products");
 const authRoutes = require("./routes/auth");
+const loginRoutes = require("./routes/login");
 
 // CORS Middleware
 app.use((req, res, next) => {
@@ -29,6 +30,7 @@ app.get("/", (req, res) => {
 
 // Routes
 app.use("/auth", authRoutes);
+app.use("/login", loginRoutes);
 app.use("/products", productRoutes);
 
 // Start server (for local development)
