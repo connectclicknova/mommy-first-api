@@ -1,6 +1,11 @@
 const express = require("express");
 const router = express.Router();
 const descopeSdk = require("@descope/node-sdk");
+const {
+  findOrCreateCustomerByEmail,
+  findOrCreateCustomerByPhone,
+  formatCustomerResponse,
+} = require("../utils/customerService");
 
 // Initialize Descope client
 const descopeClient = descopeSdk({
@@ -41,7 +46,7 @@ router.post("/email/send", async (req, res) => {
 // Verify email OTP
 router.post("/email/verify", async (req, res) => {
   try {
-    const { email, code } = req.body;
+    const { email, code, firstName, lastName } = req.body;
 
     if (!email || !code) {
       return res.status(400).json({
@@ -52,12 +57,26 @@ router.post("/email/verify", async (req, res) => {
 
     const response = await descopeClient.otp.verify.email(email, code);
 
+    // Find or create customer in Shopify
+    let customerData = null;
+    let isNewCustomer = false;
+    try {
+      const result = await findOrCreateCustomerByEmail(email, firstName || "", lastName || "");
+      customerData = formatCustomerResponse(result.customer);
+      isNewCustomer = result.isNewCustomer;
+    } catch (customerError) {
+      console.error("Customer service error:", customerError.message);
+      // Continue with login even if customer service fails
+    }
+
     return res.status(200).json({
       success: true,
-      message: "Email verified successfully",
+      message: isNewCustomer ? "Account created successfully" : "Email verified successfully",
       sessionToken: response.data.sessionJwt,
       refreshToken: response.data.refreshJwt,
       user: response.data.user,
+      customer: customerData,
+      isNewCustomer,
     });
   } catch (error) {
     console.error("Email OTP verify error:", error);
@@ -101,7 +120,7 @@ router.post("/mobile/send", async (req, res) => {
 // Verify mobile OTP
 router.post("/mobile/verify", async (req, res) => {
   try {
-    const { phone, code } = req.body;
+    const { phone, code, firstName, lastName } = req.body;
 
     if (!phone || !code) {
       return res.status(400).json({
@@ -112,12 +131,26 @@ router.post("/mobile/verify", async (req, res) => {
 
     const response = await descopeClient.otp.verify.sms(phone, code);
 
+    // Find or create customer in Shopify
+    let customerData = null;
+    let isNewCustomer = false;
+    try {
+      const result = await findOrCreateCustomerByPhone(phone, firstName || "", lastName || "");
+      customerData = formatCustomerResponse(result.customer);
+      isNewCustomer = result.isNewCustomer;
+    } catch (customerError) {
+      console.error("Customer service error:", customerError.message);
+      // Continue with login even if customer service fails
+    }
+
     return res.status(200).json({
       success: true,
-      message: "Mobile verified successfully",
+      message: isNewCustomer ? "Account created successfully" : "Mobile verified successfully",
       sessionToken: response.data.sessionJwt,
       refreshToken: response.data.refreshJwt,
       user: response.data.user,
+      customer: customerData,
+      isNewCustomer,
     });
   } catch (error) {
     console.error("Mobile OTP verify error:", error);
@@ -161,7 +194,7 @@ router.post("/google/start", async (req, res) => {
 // Exchange Google OAuth code
 router.post("/google/exchange", async (req, res) => {
   try {
-    const { code } = req.body;
+    const { code, firstName, lastName } = req.body;
 
     if (!code) {
       return res.status(400).json({
@@ -172,12 +205,36 @@ router.post("/google/exchange", async (req, res) => {
 
     const response = await descopeClient.oauth.exchange(code);
 
+    // Get email from Descope user data
+    const userEmail = response.data.user?.email;
+
+    // Find or create customer in Shopify
+    let customerData = null;
+    let isNewCustomer = false;
+    if (userEmail) {
+      try {
+        const descopeName = response.data.user?.name || "";
+        const [descopeFirstName, ...descopeLastNameParts] = descopeName.split(" ");
+        const result = await findOrCreateCustomerByEmail(
+          userEmail,
+          firstName || descopeFirstName || "",
+          lastName || descopeLastNameParts.join(" ") || ""
+        );
+        customerData = formatCustomerResponse(result.customer);
+        isNewCustomer = result.isNewCustomer;
+      } catch (customerError) {
+        console.error("Customer service error:", customerError.message);
+      }
+    }
+
     return res.status(200).json({
       success: true,
-      message: "Google login successful",
+      message: isNewCustomer ? "Account created successfully" : "Google login successful",
       sessionToken: response.data.sessionJwt,
       refreshToken: response.data.refreshJwt,
       user: response.data.user,
+      customer: customerData,
+      isNewCustomer,
     });
   } catch (error) {
     console.error("Google OAuth exchange error:", error);
@@ -221,7 +278,7 @@ router.post("/facebook/start", async (req, res) => {
 // Exchange Facebook OAuth code
 router.post("/facebook/exchange", async (req, res) => {
   try {
-    const { code } = req.body;
+    const { code, firstName, lastName } = req.body;
 
     if (!code) {
       return res.status(400).json({
@@ -232,12 +289,36 @@ router.post("/facebook/exchange", async (req, res) => {
 
     const response = await descopeClient.oauth.exchange(code);
 
+    // Get email from Descope user data
+    const userEmail = response.data.user?.email;
+
+    // Find or create customer in Shopify
+    let customerData = null;
+    let isNewCustomer = false;
+    if (userEmail) {
+      try {
+        const descopeName = response.data.user?.name || "";
+        const [descopeFirstName, ...descopeLastNameParts] = descopeName.split(" ");
+        const result = await findOrCreateCustomerByEmail(
+          userEmail,
+          firstName || descopeFirstName || "",
+          lastName || descopeLastNameParts.join(" ") || ""
+        );
+        customerData = formatCustomerResponse(result.customer);
+        isNewCustomer = result.isNewCustomer;
+      } catch (customerError) {
+        console.error("Customer service error:", customerError.message);
+      }
+    }
+
     return res.status(200).json({
       success: true,
-      message: "Facebook login successful",
+      message: isNewCustomer ? "Account created successfully" : "Facebook login successful",
       sessionToken: response.data.sessionJwt,
       refreshToken: response.data.refreshJwt,
       user: response.data.user,
+      customer: customerData,
+      isNewCustomer,
     });
   } catch (error) {
     console.error("Facebook OAuth exchange error:", error);
@@ -281,7 +362,7 @@ router.post("/apple/start", async (req, res) => {
 // Exchange Apple OAuth code
 router.post("/apple/exchange", async (req, res) => {
   try {
-    const { code } = req.body;
+    const { code, firstName, lastName } = req.body;
 
     if (!code) {
       return res.status(400).json({
@@ -292,12 +373,36 @@ router.post("/apple/exchange", async (req, res) => {
 
     const response = await descopeClient.oauth.exchange(code);
 
+    // Get email from Descope user data
+    const userEmail = response.data.user?.email;
+
+    // Find or create customer in Shopify
+    let customerData = null;
+    let isNewCustomer = false;
+    if (userEmail) {
+      try {
+        const descopeName = response.data.user?.name || "";
+        const [descopeFirstName, ...descopeLastNameParts] = descopeName.split(" ");
+        const result = await findOrCreateCustomerByEmail(
+          userEmail,
+          firstName || descopeFirstName || "",
+          lastName || descopeLastNameParts.join(" ") || ""
+        );
+        customerData = formatCustomerResponse(result.customer);
+        isNewCustomer = result.isNewCustomer;
+      } catch (customerError) {
+        console.error("Customer service error:", customerError.message);
+      }
+    }
+
     return res.status(200).json({
       success: true,
-      message: "Apple login successful",
+      message: isNewCustomer ? "Account created successfully" : "Apple login successful",
       sessionToken: response.data.sessionJwt,
       refreshToken: response.data.refreshJwt,
       user: response.data.user,
+      customer: customerData,
+      isNewCustomer,
     });
   } catch (error) {
     console.error("Apple OAuth exchange error:", error);
