@@ -6,6 +6,7 @@ const PORT = 3000;
 const productRoutes = require("./routes/products");
 const authRoutes = require("./routes/auth");
 const loginRoutes = require("./routes/login");
+const userRoutes = require("./routes/user");
 
 // CORS Middleware
 app.use(cors({
@@ -27,6 +28,7 @@ app.get("/", (req, res) => {
 app.use("/auth", authRoutes);
 app.use("/login", loginRoutes);
 app.use("/products", productRoutes);
+app.use("/user", userRoutes);
 
 // Start server (for local development)
 if (process.env.NODE_ENV !== 'production') {
