@@ -289,26 +289,45 @@ router.post("/facebook/exchange", async (req, res) => {
 
     const response = await descopeClient.oauth.exchange(code);
 
-    // Get email from Descope user data
+    // Get email and phone from Descope user data
     const userEmail = response.data.user?.email;
+    const userPhone = response.data.user?.phone;
 
     // Find or create customer in Shopify
     let customerData = null;
     let isNewCustomer = false;
-    if (userEmail) {
-      try {
-        const descopeName = response.data.user?.name || "";
-        const [descopeFirstName, ...descopeLastNameParts] = descopeName.split(" ");
+    
+    // Get name from Descope response
+    const descopeName = response.data.user?.name || "";
+    const [descopeFirstName, ...descopeLastNameParts] = descopeName.split(" ");
+    const finalFirstName = firstName || descopeFirstName || "";
+    const finalLastName = lastName || descopeLastNameParts.join(" ") || "";
+
+    try {
+      if (userEmail) {
+        // If email is available, use email to find/create customer
         const result = await findOrCreateCustomerByEmail(
           userEmail,
-          firstName || descopeFirstName || "",
-          lastName || descopeLastNameParts.join(" ") || ""
+          finalFirstName,
+          finalLastName
         );
         customerData = formatCustomerResponse(result.customer);
         isNewCustomer = result.isNewCustomer;
-      } catch (customerError) {
-        console.error("Customer service error:", customerError.message);
+      } else if (userPhone) {
+        // If no email but phone is available, use phone to find/create customer
+        const result = await findOrCreateCustomerByPhone(
+          userPhone,
+          finalFirstName,
+          finalLastName
+        );
+        customerData = formatCustomerResponse(result.customer);
+        isNewCustomer = result.isNewCustomer;
+      } else {
+        // No email or phone from Facebook - log warning
+        console.warn("Facebook login: No email or phone available from user data. User ID:", response.data.user?.userId);
       }
+    } catch (customerError) {
+      console.error("Customer service error:", customerError.message);
     }
 
     return res.status(200).json({
