@@ -19,9 +19,10 @@ const getAdminAPI = () => {
 /**
  * Find customer by email
  * @param {string} email - Customer email
+ * @param {boolean} includeMetafields - Whether to fetch metafields
  * @returns {Object|null} - Customer object or null if not found
  */
-async function findCustomerByEmail(email) {
+async function findCustomerByEmail(email, includeMetafields = true) {
   try {
     const response = await getAdminAPI().get("/customers/search.json", {
       params: {
@@ -31,7 +32,11 @@ async function findCustomerByEmail(email) {
 
     const customers = response.data.customers;
     if (customers && customers.length > 0) {
-      return customers[0];
+      const customer = customers[0];
+      if (includeMetafields && customer.id) {
+        customer.metafields = await getCustomerMetafields(customer.id);
+      }
+      return customer;
     }
     return null;
   } catch (error) {
@@ -43,9 +48,10 @@ async function findCustomerByEmail(email) {
 /**
  * Find customer by phone number
  * @param {string} phone - Customer phone number
+ * @param {boolean} includeMetafields - Whether to fetch metafields
  * @returns {Object|null} - Customer object or null if not found
  */
-async function findCustomerByPhone(phone) {
+async function findCustomerByPhone(phone, includeMetafields = true) {
   try {
     const response = await getAdminAPI().get("/customers/search.json", {
       params: {
@@ -55,7 +61,11 @@ async function findCustomerByPhone(phone) {
 
     const customers = response.data.customers;
     if (customers && customers.length > 0) {
-      return customers[0];
+      const customer = customers[0];
+      if (includeMetafields && customer.id) {
+        customer.metafields = await getCustomerMetafields(customer.id);
+      }
+      return customer;
     }
     return null;
   } catch (error) {
@@ -114,6 +124,40 @@ async function getCustomerById(customerId) {
     return response.data.customer;
   } catch (error) {
     console.error("Error getting customer by ID:", error.message);
+    throw error;
+  }
+}
+
+/**
+ * Get customer metafields
+ * @param {number} customerId - Shopify customer ID
+ * @returns {Array} - Array of metafield objects
+ */
+async function getCustomerMetafields(customerId) {
+  try {
+    const response = await getAdminAPI().get(`/customers/${customerId}/metafields.json`);
+    return response.data.metafields || [];
+  } catch (error) {
+    console.error("Error getting customer metafields:", error.message);
+    return [];
+  }
+}
+
+/**
+ * Get customer with metafields
+ * @param {number} customerId - Shopify customer ID
+ * @returns {Object} - Customer object with metafields
+ */
+async function getCustomerWithMetafields(customerId) {
+  try {
+    const [customer, metafields] = await Promise.all([
+      getCustomerById(customerId),
+      getCustomerMetafields(customerId),
+    ]);
+    customer.metafields = metafields;
+    return customer;
+  } catch (error) {
+    console.error("Error getting customer with metafields:", error.message);
     throw error;
   }
 }
@@ -220,6 +264,41 @@ async function findOrCreateCustomerByPhone(phone, firstName = "", lastName = "")
 }
 
 /**
+ * Format metafields for API response
+ * @param {Array} metafields - Array of Shopify metafield objects
+ * @returns {Object} - Formatted metafields as key-value pairs grouped by namespace
+ */
+function formatMetafields(metafields) {
+  if (!metafields || metafields.length === 0) {
+    return {};
+  }
+
+  const formatted = {};
+  metafields.forEach((metafield) => {
+    const namespace = metafield.namespace || "custom";
+    if (!formatted[namespace]) {
+      formatted[namespace] = {};
+    }
+    // Parse JSON values if the type is json or json_string
+    let value = metafield.value;
+    if (metafield.type === "json" || metafield.type === "json_string") {
+      try {
+        value = JSON.parse(metafield.value);
+      } catch (e) {
+        // Keep original value if parsing fails
+      }
+    }
+    formatted[namespace][metafield.key] = {
+      value: value,
+      type: metafield.type,
+      id: metafield.id,
+    };
+  });
+
+  return formatted;
+}
+
+/**
  * Format customer data for API response
  * @param {Object} customer - Shopify customer object
  * @returns {Object} - Formatted customer object
@@ -239,6 +318,7 @@ function formatCustomerResponse(customer) {
     verifiedEmail: customer.verified_email || false,
     acceptsMarketing: customer.accepts_marketing || false,
     defaultAddress: customer.default_address || null,
+    metafields: formatMetafields(customer.metafields),
   };
 }
 
@@ -247,8 +327,11 @@ module.exports = {
   findCustomerByPhone,
   createCustomer,
   getCustomerById,
+  getCustomerMetafields,
+  getCustomerWithMetafields,
   updateCustomer,
   findOrCreateCustomerByEmail,
   findOrCreateCustomerByPhone,
   formatCustomerResponse,
+  formatMetafields,
 };

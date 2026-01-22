@@ -2,7 +2,7 @@ const express = require("express");
 const router = express.Router();
 const verifyToken = require("../middleware/auth");
 const {
-  getCustomerById,
+  getCustomerWithMetafields,
   updateCustomer,
   formatCustomerResponse,
 } = require("../utils/customerService");
@@ -23,8 +23,8 @@ router.get("/:userId", verifyToken, async (req, res) => {
       });
     }
 
-    // Get customer from Shopify
-    const customer = await getCustomerById(userId);
+    // Get customer from Shopify with metafields
+    const customer = await getCustomerWithMetafields(userId);
 
     if (!customer) {
       return res.status(404).json({
