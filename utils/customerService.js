@@ -159,6 +159,138 @@ async function getCustomerAddresses(customerId) {
 }
 
 /**
+ * Add a new address for a customer
+ * @param {number} customerId - Shopify customer ID
+ * @param {Object} addressData - Address data
+ * @returns {Object} - Created address object
+ */
+async function addCustomerAddress(customerId, addressData) {
+  try {
+    const address = {
+      address: {
+        first_name: addressData.firstName,
+        last_name: addressData.lastName,
+        company: addressData.company,
+        address1: addressData.address1,
+        address2: addressData.address2,
+        city: addressData.city,
+        province: addressData.province,
+        country: addressData.country,
+        zip: addressData.zip,
+        phone: addressData.phone,
+      },
+    };
+
+    // Remove undefined fields
+    Object.keys(address.address).forEach((key) => {
+      if (address.address[key] === undefined) {
+        delete address.address[key];
+      }
+    });
+
+    const response = await getAdminAPI().post(
+      `/customers/${customerId}/addresses.json`,
+      address
+    );
+
+    // Set as default if requested
+    if (addressData.isDefault && response.data.customer_address) {
+      await setDefaultAddress(customerId, response.data.customer_address.id);
+      response.data.customer_address.default = true;
+    }
+
+    return response.data.customer_address;
+  } catch (error) {
+    console.error("Error adding customer address:", error.response?.data || error.message);
+    throw error;
+  }
+}
+
+/**
+ * Update an existing customer address
+ * @param {number} customerId - Shopify customer ID
+ * @param {number} addressId - Address ID to update
+ * @param {Object} addressData - Address data to update
+ * @returns {Object} - Updated address object
+ */
+async function updateCustomerAddress(customerId, addressId, addressData) {
+  try {
+    const address = {
+      address: {
+        id: addressId,
+        first_name: addressData.firstName,
+        last_name: addressData.lastName,
+        company: addressData.company,
+        address1: addressData.address1,
+        address2: addressData.address2,
+        city: addressData.city,
+        province: addressData.province,
+        country: addressData.country,
+        zip: addressData.zip,
+        phone: addressData.phone,
+      },
+    };
+
+    // Remove undefined fields
+    Object.keys(address.address).forEach((key) => {
+      if (address.address[key] === undefined) {
+        delete address.address[key];
+      }
+    });
+
+    const response = await getAdminAPI().put(
+      `/customers/${customerId}/addresses/${addressId}.json`,
+      address
+    );
+
+    // Set as default if requested
+    if (addressData.isDefault && response.data.customer_address) {
+      await setDefaultAddress(customerId, addressId);
+      response.data.customer_address.default = true;
+    }
+
+    return response.data.customer_address;
+  } catch (error) {
+    console.error("Error updating customer address:", error.response?.data || error.message);
+    throw error;
+  }
+}
+
+/**
+ * Delete a customer address
+ * @param {number} customerId - Shopify customer ID
+ * @param {number} addressId - Address ID to delete
+ * @returns {boolean} - True if deleted successfully
+ */
+async function deleteCustomerAddress(customerId, addressId) {
+  try {
+    await getAdminAPI().delete(`/customers/${customerId}/addresses/${addressId}.json`);
+    return true;
+  } catch (error) {
+    console.error("Error deleting customer address:", error.response?.data || error.message);
+    throw error;
+  }
+}
+
+/**
+ * Set an address as the default address
+ * @param {number} customerId - Shopify customer ID
+ * @param {number} addressId - Address ID to set as default
+ * @returns {Object} - Updated address object
+ */
+async function setDefaultAddress(customerId, addressId) {
+  try {
+    const response = await getAdminAPI().put(
+      `/customers/${customerId}/addresses/${addressId}/default.json`
+    );
+    return response.data.customer_address;
+  } catch (error) {
+    console.error("Error setting default address:", error.response?.data || error.message);
+    throw error;
+  }
+}
+
+/**
  * Update or create a customer metafield
  * @param {number} customerId - Shopify customer ID
  * @param {Object} metafieldData - Metafield data
@@ -459,6 +591,10 @@ module.exports = {
   getCustomerById,
   getCustomerMetafields,
   getCustomerAddresses,
+  addCustomerAddress,
+  updateCustomerAddress,
+  deleteCustomerAddress,
+  setDefaultAddress,
   getCustomerWithMetafields,
   updateCustomer,
   updateCustomerMetafield,
