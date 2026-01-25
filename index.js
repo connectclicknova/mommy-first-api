@@ -8,6 +8,7 @@ const authRoutes = require("./routes/auth");
 const loginRoutes = require("./routes/login");
 const userRoutes = require("./routes/user");
 const cartRoutes = require("./routes/cart");
+const blogsRoutes = require("./routes/blogs");
 
 // CORS Middleware
 app.use(cors({
@@ -31,6 +32,7 @@ app.use("/login", loginRoutes);
 app.use("/products", productRoutes);
 app.use("/user", userRoutes);
 app.use("/cart", cartRoutes);
+app.use("/blogs", blogsRoutes);
 
 // Start server (for local development)
 if (process.env.NODE_ENV !== 'production') {
