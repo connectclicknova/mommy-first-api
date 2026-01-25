@@ -144,6 +144,58 @@ async function getCustomerMetafields(customerId) {
 }
 
 /**
+ * Update or create a customer metafield
+ * @param {number} customerId - Shopify customer ID
+ * @param {Object} metafieldData - Metafield data
+ * @param {string} metafieldData.namespace - Metafield namespace (default: 'custom')
+ * @param {string} metafieldData.key - Metafield key
+ * @param {string} metafieldData.value - Metafield value
+ * @param {string} metafieldData.type - Metafield type (default: 'single_line_text_field')
+ * @returns {Object} - Created/updated metafield object
+ */
+async function updateCustomerMetafield(customerId, metafieldData) {
+  try {
+    const { namespace = "custom", key, value, type = "single_line_text_field" } = metafieldData;
+
+    const metafield = {
+      metafield: {
+        namespace,
+        key,
+        value: typeof value === "object" ? JSON.stringify(value) : String(value),
+        type: typeof value === "object" ? "json" : type,
+      },
+    };
+
+    const response = await getAdminAPI().post(
+      `/customers/${customerId}/metafields.json`,
+      metafield
+    );
+    return response.data.metafield;
+  } catch (error) {
+    console.error("Error updating customer metafield:", error.response?.data || error.message);
+    throw error;
+  }
+}
+
+/**
+ * Update multiple customer metafields
+ * @param {number} customerId - Shopify customer ID
+ * @param {Array} metafields - Array of metafield objects
+ * @returns {Array} - Array of updated metafield objects
+ */
+async function updateCustomerMetafields(customerId, metafields) {
+  try {
+    const results = await Promise.all(
+      metafields.map((metafield) => updateCustomerMetafield(customerId, metafield))
+    );
+    return results;
+  } catch (error) {
+    console.error("Error updating customer metafields:", error.message);
+    throw error;
+  }
+}
+
+/**
  * Get customer with metafields
  * @param {number} customerId - Shopify customer ID
  * @returns {Object} - Customer object with metafields
@@ -166,31 +218,58 @@ async function getCustomerWithMetafields(customerId) {
  * Update customer details
  * @param {number} customerId - Shopify customer ID
  * @param {Object} updateData - Data to update
- * @returns {Object} - Updated customer object
+ * @param {string} updateData.firstName - First name
+ * @param {string} updateData.lastName - Last name
+ * @param {string} updateData.email - Email
+ * @param {string} updateData.phone - Phone
+ * @param {Array} updateData.metafields - Array of metafield objects to update
+ * @returns {Object} - Updated customer object with metafields
  */
 async function updateCustomer(customerId, updateData) {
   try {
-    const { firstName, lastName, email, phone } = updateData;
+    const { firstName, lastName, email, phone, metafields: metafieldsToUpdate } = updateData;
 
-    const customer = {
-      customer: {
-        id: customerId,
-        first_name: firstName,
-        last_name: lastName,
-        email: email,
-        phone: phone,
-      },
-    };
+    // Update basic customer fields if any provided
+    const hasBasicFields = firstName !== undefined || lastName !== undefined || 
+                           email !== undefined || phone !== undefined;
 
-    // Remove undefined fields
-    Object.keys(customer.customer).forEach((key) => {
-      if (customer.customer[key] === undefined) {
-        delete customer.customer[key];
-      }
-    });
+    let updatedCustomer;
 
-    const response = await getAdminAPI().put(`/customers/${customerId}.json`, customer);
-    return response.data.customer;
+    if (hasBasicFields) {
+      const customer = {
+        customer: {
+          id: customerId,
+          first_name: firstName,
+          last_name: lastName,
+          email: email,
+          phone: phone,
+        },
+      };
+
+      // Remove undefined fields
+      Object.keys(customer.customer).forEach((key) => {
+        if (customer.customer[key] === undefined) {
+          delete customer.customer[key];
+        }
+      });
+
+      const response = await getAdminAPI().put(`/customers/${customerId}.json`, customer);
+      updatedCustomer = response.data.customer;
+    } else {
+      // If no basic fields, just get the current customer
+      updatedCustomer = await getCustomerById(customerId);
+    }
+
+    // Update metafields if provided
+    if (metafieldsToUpdate && Array.isArray(metafieldsToUpdate) && metafieldsToUpdate.length > 0) {
+      await updateCustomerMetafields(customerId, metafieldsToUpdate);
+    }
+
+    // Fetch updated metafields to include in response
+    const metafields = await getCustomerMetafields(customerId);
+    updatedCustomer.metafields = metafields;
+
+    return updatedCustomer;
   } catch (error) {
     console.error("Error updating customer:", error.response?.data || error.message);
     throw error;
@@ -330,6 +409,8 @@ module.exports = {
   getCustomerMetafields,
   getCustomerWithMetafields,
   updateCustomer,
+  updateCustomerMetafield,
+  updateCustomerMetafields,
   findOrCreateCustomerByEmail,
   findOrCreateCustomerByPhone,
   formatCustomerResponse,

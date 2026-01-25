@@ -66,7 +66,7 @@ router.get("/:userId", verifyToken, async (req, res) => {
 router.put("/:userId", verifyToken, async (req, res) => {
   try {
     const { userId } = req.params;
-    const { firstName, lastName, email, phone } = req.body;
+    const { firstName, lastName, email, phone, metafields } = req.body;
 
     // Validate userId
     if (!userId || isNaN(userId)) {
@@ -77,11 +77,26 @@ router.put("/:userId", verifyToken, async (req, res) => {
     }
 
     // Check if at least one field is provided for update
-    if (!firstName && !lastName && !email && !phone) {
+    const hasBasicFields = firstName || lastName || email || phone;
+    const hasMetafields = metafields && Array.isArray(metafields) && metafields.length > 0;
+
+    if (!hasBasicFields && !hasMetafields) {
       return res.status(400).json({
         success: false,
-        message: "At least one field (firstName, lastName, email, phone) is required for update",
+        message: "At least one field (firstName, lastName, email, phone) or metafields is required for update",
       });
+    }
+
+    // Validate metafields format if provided
+    if (hasMetafields) {
+      for (const metafield of metafields) {
+        if (!metafield.key || metafield.value === undefined) {
+          return res.status(400).json({
+            success: false,
+            message: "Each metafield must have 'key' and 'value' properties",
+          });
+        }
+      }
     }
 
     // Build update data object
@@ -90,6 +105,7 @@ router.put("/:userId", verifyToken, async (req, res) => {
     if (lastName !== undefined) updateData.lastName = lastName;
     if (email !== undefined) updateData.email = email;
     if (phone !== undefined) updateData.phone = phone;
+    if (hasMetafields) updateData.metafields = metafields;
 
     // Update customer in Shopify
     const updatedCustomer = await updateCustomer(userId, updateData);
