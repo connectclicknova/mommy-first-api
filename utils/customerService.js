@@ -144,6 +144,21 @@ async function getCustomerMetafields(customerId) {
 }
 
 /**
+ * Get customer addresses
+ * @param {number} customerId - Shopify customer ID
+ * @returns {Array} - Array of address objects
+ */
+async function getCustomerAddresses(customerId) {
+  try {
+    const response = await getAdminAPI().get(`/customers/${customerId}/addresses.json`);
+    return response.data.addresses || [];
+  } catch (error) {
+    console.error("Error getting customer addresses:", error.message);
+    return [];
+  }
+}
+
+/**
  * Update or create a customer metafield
  * @param {number} customerId - Shopify customer ID
  * @param {Object} metafieldData - Metafield data
@@ -196,17 +211,19 @@ async function updateCustomerMetafields(customerId, metafields) {
 }
 
 /**
- * Get customer with metafields
+ * Get customer with metafields and addresses
  * @param {number} customerId - Shopify customer ID
- * @returns {Object} - Customer object with metafields
+ * @returns {Object} - Customer object with metafields and addresses
  */
 async function getCustomerWithMetafields(customerId) {
   try {
-    const [customer, metafields] = await Promise.all([
+    const [customer, metafields, addresses] = await Promise.all([
       getCustomerById(customerId),
       getCustomerMetafields(customerId),
+      getCustomerAddresses(customerId),
     ]);
     customer.metafields = metafields;
+    customer.addresses = addresses;
     return customer;
   } catch (error) {
     console.error("Error getting customer with metafields:", error.message);
@@ -378,11 +395,44 @@ function formatMetafields(metafields) {
 }
 
 /**
+ * Format address for API response
+ * @param {Object} address - Shopify address object
+ * @returns {Object} - Formatted address object
+ */
+function formatAddress(address) {
+  if (!address) return null;
+  return {
+    id: address.id,
+    firstName: address.first_name || "",
+    lastName: address.last_name || "",
+    company: address.company || "",
+    address1: address.address1 || "",
+    address2: address.address2 || "",
+    city: address.city || "",
+    province: address.province || "",
+    provinceCode: address.province_code || "",
+    country: address.country || "",
+    countryCode: address.country_code || "",
+    zip: address.zip || "",
+    phone: address.phone || "",
+    isDefault: address.default || false,
+  };
+}
+
+/**
  * Format customer data for API response
  * @param {Object} customer - Shopify customer object
  * @returns {Object} - Formatted customer object
  */
 function formatCustomerResponse(customer) {
+  // Format all addresses
+  const formattedAddresses = (customer.addresses || []).map(formatAddress);
+  
+  // Find default address from the list or use the default_address field
+  const defaultAddress = customer.default_address 
+    ? formatAddress(customer.default_address)
+    : formattedAddresses.find(addr => addr?.isDefault) || null;
+
   return {
     id: customer.id,
     email: customer.email,
@@ -396,7 +446,8 @@ function formatCustomerResponse(customer) {
     totalSpent: customer.total_spent || "0.00",
     verifiedEmail: customer.verified_email || false,
     acceptsMarketing: customer.accepts_marketing || false,
-    defaultAddress: customer.default_address || null,
+    defaultAddress: defaultAddress,
+    addresses: formattedAddresses,
     metafields: formatMetafields(customer.metafields),
   };
 }
@@ -407,6 +458,7 @@ module.exports = {
   createCustomer,
   getCustomerById,
   getCustomerMetafields,
+  getCustomerAddresses,
   getCustomerWithMetafields,
   updateCustomer,
   updateCustomerMetafield,
@@ -414,5 +466,6 @@ module.exports = {
   findOrCreateCustomerByEmail,
   findOrCreateCustomerByPhone,
   formatCustomerResponse,
+  formatAddress,
   formatMetafields,
 };
