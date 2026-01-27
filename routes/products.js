@@ -274,6 +274,112 @@ router.get(["/", "/pg-:page"], verifyToken, async (req, res) => {
   }
 });
 
+// GET product details by handle (productname)
+router.get('/:handle', verifyToken, async (req, res) => {
+  try {
+    const { handle } = req.params;
+    if (!handle) {
+      return res.status(400).json({
+        success: false,
+        message: 'Product handle is required',
+      });
+    }
+
+    const query = `
+      {
+        productByHandle(handle: "${handle}") {
+          id
+          title
+          description
+          handle
+          productType
+          vendor
+          tags
+          createdAt
+          updatedAt
+          images(first: 5) {
+            edges {
+              node {
+                id
+                url
+                altText
+                width
+                height
+              }
+            }
+          }
+          variants(first: 10) {
+            edges {
+              node {
+                id
+                title
+                price {
+                  amount
+                  currencyCode
+                }
+                compareAtPrice {
+                  amount
+                  currencyCode
+                }
+                availableForSale
+                quantityAvailable
+                selectedOptions {
+                  name
+                  value
+                }
+                image {
+                  url
+                  altText
+                }
+              }
+            }
+          }
+          priceRange {
+            minVariantPrice {
+              amount
+              currencyCode
+            }
+            maxVariantPrice {
+              amount
+              currencyCode
+            }
+          }
+          availableForSale
+          metafields(identifiers: [
+            {namespace: "global", key: "title_tag"},
+            {namespace: "global", key: "description_tag"}
+          ]) {
+            namespace
+            key
+            value
+            type
+            description
+          }
+        }
+      }
+    `;
+
+    const response = await storefrontAPI.post('', { query });
+    if (!response.data || !response.data.data || !response.data.data.productByHandle) {
+      return res.status(404).json({
+        success: false,
+        message: `Product not found for handle '${handle}'`,
+      });
+    }
+    return res.status(200).json({
+      success: true,
+      product: response.data.data.productByHandle,
+    });
+  } catch (error) {
+    console.error('Error fetching product by handle:', error.response?.data || error.message);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch product by handle',
+      error: error.response?.data || error.message,
+    });
+  }
+});
+
 // Search products by phrase (Protected)
 router.get("/search", verifyToken, async (req, res) => {
   try {
