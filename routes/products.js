@@ -106,6 +106,16 @@ router.get(["/", "/pg-:page"], verifyToken, async (req, res) => {
                     }
                   }
                   availableForSale
+                  metafields(identifiers: [
+                    {namespace: "global", key: "title_tag"},
+                    {namespace: "global", key: "description_tag"}
+                  ]) {
+                    namespace
+                    key
+                    value
+                    type
+                    description
+                  }
                 }
               }
               pageInfo {
@@ -120,15 +130,14 @@ router.get(["/", "/pg-:page"], verifyToken, async (req, res) => {
       // For page > 1, we need to fetch all products and slice
       // Note: In production, you'd want to use cursor-based pagination
       const response = await storefrontAPI.post("", { query: collectionQuery });
-      
-      if (!response.data.data.collection) {
-        return res.status(404).json({
+      if (!response.data || !response.data.data || !response.data.data.collection || !response.data.data.collection.products) {
+        return res.status(500).json({
           success: false,
-          message: `Collection '${cid}' not found`,
+          message: `Malformed response from Shopify API (collection)`,
+          error: response.data
         });
       }
-
-      const allProducts = response.data.data.collection.products.edges.map(edge => edge.node);
+      const allProducts = response.data.data.collection.products.edges?.map(edge => edge.node) || [];
       const startIndex = (page - 1) * productsPerPage;
       const endIndex = startIndex + productsPerPage;
       const products = allProducts.slice(startIndex, endIndex);
@@ -211,6 +220,16 @@ router.get(["/", "/pg-:page"], verifyToken, async (req, res) => {
                   }
                 }
                 availableForSale
+                metafields(identifiers: [
+                  {namespace: "global", key: "title_tag"},
+                  {namespace: "global", key: "description_tag"}
+                ]) {
+                  namespace
+                  key
+                  value
+                  type
+                  description
+                }
               }
             }
             pageInfo {
@@ -222,17 +241,22 @@ router.get(["/", "/pg-:page"], verifyToken, async (req, res) => {
       `;
 
       const response = await storefrontAPI.post("", { query });
-      const allProducts = response.data.data.products.edges.map(edge => edge.node);
-      
+      if (!response.data || !response.data.data || !response.data.data.products) {
+        return res.status(500).json({
+          success: false,
+          message: `Malformed response from Shopify API (products)`,
+          error: response.data
+        });
+      }
+      const allProducts = response.data.data.products.edges?.map(edge => edge.node) || [];
       // Slice products for the requested page
       const startIndex = (page - 1) * productsPerPage;
       const endIndex = startIndex + productsPerPage;
       const products = allProducts.slice(startIndex, endIndex);
-      const hasNextPage = response.data.data.products.pageInfo.hasNextPage || endIndex < allProducts.length;
+      const hasNextPage = response.data.data.products.pageInfo?.hasNextPage || endIndex < allProducts.length;
 
       return res.status(200).json({
         success: true,
-        page: page,
         productsPerPage: productsPerPage,
         count: products.length,
         totalProductCount: allProducts.length,
