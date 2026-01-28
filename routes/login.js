@@ -7,6 +7,30 @@ const {
   formatCustomerResponse,
 } = require("../utils/customerService");
 
+// Helper: Login to Shopify Admin (returns session info or token)
+async function loginToShopifyAdmin(email, phone) {
+  // Example: fetch customer by email or phone, return customer and a mock session token
+  try {
+    let customer = null;
+    if (email) {
+      customer = await require("../utils/customerService").findCustomerByEmail(email, false);
+    } else if (phone) {
+      customer = await require("../utils/customerService").findCustomerByPhone(phone, false);
+    }
+    // You can add more logic here to generate a session token or fetch metafields, etc.
+    return {
+      shopifyAdminCustomer: customer,
+      shopifyAdminSession: customer ? `shopify-session-for-${customer.id}` : null,
+    };
+  } catch (err) {
+    return {
+      shopifyAdminCustomer: null,
+      shopifyAdminSession: null,
+      shopifyAdminError: err.message,
+    };
+  }
+}
+
 // Initialize Descope client
 const descopeClient = descopeSdk({
   projectId: process.env.DESCOPE_PROJECT_ID,
@@ -69,6 +93,9 @@ router.post("/email/verify", async (req, res) => {
       // Continue with login even if customer service fails
     }
 
+    // Login to Shopify Admin
+    const shopifyAdminLogin = await loginToShopifyAdmin(email, null);
+
     return res.status(200).json({
       success: true,
       message: isNewCustomer ? "Account created successfully" : "Email verified successfully",
@@ -77,6 +104,7 @@ router.post("/email/verify", async (req, res) => {
       user: response.data.user,
       customer: customerData,
       isNewCustomer,
+      shopifyAdmin: shopifyAdminLogin,
     });
   } catch (error) {
     console.error("Email OTP verify error:", error);
@@ -143,6 +171,9 @@ router.post("/mobile/verify", async (req, res) => {
       // Continue with login even if customer service fails
     }
 
+    // Login to Shopify Admin
+    const shopifyAdminLogin = await loginToShopifyAdmin(null, phone);
+
     return res.status(200).json({
       success: true,
       message: isNewCustomer ? "Account created successfully" : "Mobile verified successfully",
@@ -151,6 +182,7 @@ router.post("/mobile/verify", async (req, res) => {
       user: response.data.user,
       customer: customerData,
       isNewCustomer,
+      shopifyAdmin: shopifyAdminLogin,
     });
   } catch (error) {
     console.error("Mobile OTP verify error:", error);
@@ -227,6 +259,9 @@ router.post("/google/exchange", async (req, res) => {
       }
     }
 
+    // Login to Shopify Admin
+    const shopifyAdminLogin = await loginToShopifyAdmin(userEmail, null);
+
     return res.status(200).json({
       success: true,
       message: isNewCustomer ? "Account created successfully" : "Google login successful",
@@ -235,6 +270,7 @@ router.post("/google/exchange", async (req, res) => {
       user: response.data.user,
       customer: customerData,
       isNewCustomer,
+      shopifyAdmin: shopifyAdminLogin,
     });
   } catch (error) {
     console.error("Google OAuth exchange error:", error);
@@ -330,6 +366,9 @@ router.post("/facebook/exchange", async (req, res) => {
       console.error("Customer service error:", customerError.message);
     }
 
+    // Login to Shopify Admin
+    const shopifyAdminLogin = await loginToShopifyAdmin(userEmail, userPhone);
+
     return res.status(200).json({
       success: true,
       message: isNewCustomer ? "Account created successfully" : "Facebook login successful",
@@ -338,6 +377,7 @@ router.post("/facebook/exchange", async (req, res) => {
       user: response.data.user,
       customer: customerData,
       isNewCustomer,
+      shopifyAdmin: shopifyAdminLogin,
     });
   } catch (error) {
     console.error("Facebook OAuth exchange error:", error);
@@ -414,6 +454,9 @@ router.post("/apple/exchange", async (req, res) => {
       }
     }
 
+    // Login to Shopify Admin
+    const shopifyAdminLogin = await loginToShopifyAdmin(userEmail, null);
+
     return res.status(200).json({
       success: true,
       message: isNewCustomer ? "Account created successfully" : "Apple login successful",
@@ -422,6 +465,7 @@ router.post("/apple/exchange", async (req, res) => {
       user: response.data.user,
       customer: customerData,
       isNewCustomer,
+      shopifyAdmin: shopifyAdminLogin,
     });
   } catch (error) {
     console.error("Apple OAuth exchange error:", error);
