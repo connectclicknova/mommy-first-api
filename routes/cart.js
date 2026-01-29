@@ -11,6 +11,7 @@ const {
   saveUserCartId,
   mergeCartsOnLogin,
   clearUserCart,
+  updateCartBuyerIdentity,
 } = require("../utils/cartService");
 
 // ==================== CART MERGE ENDPOINT (Call after login) ====================
@@ -479,6 +480,61 @@ router.delete("/:cartId/items", async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Failed to remove items from cart",
+      error: error.message,
+    });
+  }
+});
+
+
+/**
+ * POST /cart/checkout
+ * Initiate the shopify checkout and return checkout URL
+ */
+router.post("/checkout", async (req, res) => {
+  try {
+    const { cartId, customerAccessToken } = req.body;
+
+    if (!cartId) {
+      return res.status(400).json({
+        success: false,
+        message: "cartId is required",
+      });
+    }
+
+    let checkoutUrl;
+    let buyerIdentity = null;
+
+    if (customerAccessToken) {
+      // If customer access token is provided, associate it with the cart
+      // This will pre-fill the checkout with customer details
+      const result = await updateCartBuyerIdentity(cartId, customerAccessToken);
+      checkoutUrl = result.checkoutUrl;
+      buyerIdentity = result.buyerIdentity;
+    } else {
+      // If no customer token, just get the cart to retrieve checkout URL
+      // Note: getCart already returns checkoutUrl
+      const decodedCartId = decodeURIComponent(cartId);
+      const cart = await getCart(decodedCartId);
+      if (!cart) {
+        return res.status(404).json({
+          success: false,
+          message: "Cart not found",
+        });
+      }
+      checkoutUrl = cart.checkoutUrl;
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "Checkout URL generated successfully",
+      checkoutUrl,
+      buyerIdentity,
+    });
+  } catch (error) {
+    console.error("Error generating checkout URL:", error.message);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to generate checkout URL",
       error: error.message,
     });
   }

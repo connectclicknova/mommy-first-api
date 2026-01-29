@@ -6,6 +6,11 @@ const {
   findOrCreateCustomerByPhone,
   formatCustomerResponse,
 } = require("../utils/customerService");
+const {
+  createCustomerAccessToken,
+  createCustomer: createShopifyCustomer,
+  GetCustomerDataFromAccessToken
+} = require("../utils/shopifyStorefront");
 
 // Helper: Login to Shopify Admin (returns session info or token)
 async function loginToShopifyAdmin(email, phone) {
@@ -157,7 +162,7 @@ router.post("/mobile/verify", async (req, res) => {
       });
     }
 
-    const response = await descopeClient.otp.verify.sms(phone, code);
+    const response = await descopeClient.otp.verify.sms(phone, code); // TODO: Check for the response from descope and return or proceed accordingly
 
     // Find or create customer in Shopify
     let customerData = null;
@@ -332,7 +337,7 @@ router.post("/facebook/exchange", async (req, res) => {
     // Find or create customer in Shopify
     let customerData = null;
     let isNewCustomer = false;
-    
+
     // Get name from Descope response
     const descopeName = response.data.user?.name || "";
     const [descopeFirstName, ...descopeLastNameParts] = descopeName.split(" ");
@@ -558,6 +563,95 @@ router.post("/logout", async (req, res) => {
     return res.status(500).json({
       success: false,
       message: error.message || "Failed to logout",
+    });
+  }
+});
+
+// ==================== SHOPIFY NATIVE AUTH ====================
+
+// Shopify Login (Email & Password)
+router.post("/shopify/login", async (req, res) => {
+  try {
+    const { email, password } = req.body;
+
+    if (!email || !password) {
+      return res.status(400).json({
+        success: false,
+        message: "Email and password are required",
+      });
+    }
+
+    const result = await createCustomerAccessToken(email, password);
+
+    if (!result.success) {
+      return res.status(401).json({
+        success: false,
+        message: "Invalid credentials",
+        errors: result.errors,
+      });
+    }
+
+    // Optional: Fetch full customer details using Admin API if needed
+    let customerData = null;
+    try {
+      const customerResult = await GetCustomerDataFromAccessToken(result.accessToken.accessToken);
+      customerData = customerResult;
+    } catch (err) {
+      console.warn("Failed to fetch customer details after Shopify login", err);
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "Login successful",
+      accessToken: result.accessToken,
+      customer: customerData,
+    });
+  } catch (error) {
+    console.error("Shopify login error:", error);
+    return res.status(500).json({
+      success: false,
+      message: error.message || "Failed to login",
+    });
+  }
+});
+
+// Shopify Register (Email, Password, Name)
+router.post("/shopify/register", async (req, res) => {
+  try {
+    const { email, password, firstName, lastName } = req.body;
+
+    if (!email || !password) {
+      return res.status(400).json({
+        success: false,
+        message: "Email and password are required",
+      });
+    }
+
+    const result = await createShopifyCustomer({
+      email,
+      password,
+      firstName,
+      lastName,
+    });
+
+    if (!result.success) {
+      return res.status(400).json({
+        success: false,
+        message: "Registration failed",
+        errors: result.errors,
+      });
+    }
+
+    return res.status(201).json({
+      success: true,
+      message: "Account created successfully",
+      customer: result.customer,
+    });
+  } catch (error) {
+    console.error("Shopify registration error:", error);
+    return res.status(500).json({
+      success: false,
+      message: error.message || "Failed to register",
     });
   }
 });
