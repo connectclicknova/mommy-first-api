@@ -804,6 +804,253 @@ if (customer) {
 
 ---
 
+## Shopify Email/Password Login
+
+This endpoint provides a unified login/registration experience. It returns a `customerAccessToken` that can be used with Shopify's Storefront API to perform customer-specific operations like managing cart, addresses, and orders.
+
+### How It Works
+
+The endpoint automatically handles both new and existing users:
+1. **Existing User**: Logs in and returns access token
+2. **New User**: Automatically registers with default values (firstName: "-", lastName: "-", acceptsMarketing: false) and returns access token
+
+### Endpoint
+
+**POST** `/login/shopify/email`
+
+**Request:**
+```json
+{
+  "email": "customer@example.com",
+  "password": "secure-password"
+}
+```
+
+> **Note:** Password must be at least 5 characters long
+
+**Response (Success - Existing User - 200):**
+```json
+{
+  "success": true,
+  "message": "Login successful",
+  "isNewUser": false,
+  "data": {
+    "customerAccessToken": "abc123def456ghi789jkl012mno345pqr678stu901vwx234yz",
+    "expiresAt": "2026-02-28T10:30:00Z"
+  }
+}
+```
+
+**Response (Success - New User Auto-Registered - 201):**
+```json
+{
+  "success": true,
+  "message": "Account created and logged in successfully",
+  "isNewUser": true,
+  "data": {
+    "customerAccessToken": "abc123def456ghi789jkl012mno345pqr678stu901vwx234yz",
+    "expiresAt": "2026-02-28T10:30:00Z"
+  }
+}
+```
+
+**Response (Error - 400 - Missing Fields):**
+```json
+{
+  "success": false,
+  "message": "Email and password are required"
+}
+```
+
+**Response (Error - 400 - Password Too Short):**
+```json
+{
+  "success": false,
+  "message": "Password must be at least 5 characters long"
+}
+```
+
+**Response (Error - 400 - Wrong Password):**
+```json
+{
+  "success": false,
+  "message": "Login failed",
+  "errors": [
+    {
+      "code": "INVALID_CREDENTIALS",
+      "field": null,
+      "message": "Invalid credentials"
+    }
+  ]
+}
+```
+
+**Response (Error - 500):**
+```json
+{
+  "success": false,
+  "message": "Failed to login",
+  "error": "Error details..."
+}
+```
+
+### Using the Customer Access Token
+
+Once you have the `customerAccessToken`, include it in Shopify Storefront API requests:
+
+```javascript
+const query = `
+  query {
+    customer(customerAccessToken: "abc123...") {
+      id
+      email
+      firstName
+      lastName
+      orders(first: 10) {
+        edges {
+          node {
+            id
+            orderNumber
+            totalPrice {
+              amount
+              currencyCode
+            }
+          }
+        }
+      }
+    }
+  }
+`;
+```
+
+Or use it for cart operations:
+
+```javascript
+const mutation = `
+  mutation checkoutCreate($input: CheckoutCreateInput!) {
+    checkoutCreate(input: $input) {
+      checkout {
+        id
+        webUrl
+      }
+    }
+  }
+`;
+```
+
+### Notes
+
+- The `customerAccessToken` typically expires in 30 days
+- Store the token securely on the client side
+- The customer must have a password set in Shopify for this to work
+- This is different from the Descope OTP login which creates/manages customers via Admin API
+
+---
+
+## Shopify Mobile/Password Login
+
+This endpoint provides mobile number-based login/registration. It automatically handles both new and existing users, similar to the email endpoint.
+
+### How It Works
+
+1. **Existing User**: Searches for customer by phone number and logs them in
+2. **New User**: Auto-registers with phone number (generates unique email like `1234567890@phone.user`) and default values:
+   - `firstName: "-"`
+   - `lastName: "-"`
+   - `acceptsMarketing: false`
+
+### Endpoint
+
+**POST** `/login/shopify/mobile`
+
+**Request:**
+```json
+{
+  "phone": "+919876543210",
+  "password": "secure-password"
+}
+```
+
+> **Note:** 
+> - Phone number should include country code (e.g., +91 for India)
+> - Password must be at least 5 characters long
+> - Uses Admin API for customer search and registration
+
+**Response (Success - Existing User - 200):**
+```json
+{
+  "success": true,
+  "message": "Login successful",
+  "isNewUser": false,
+  "data": {
+    "customerAccessToken": "abc123def456ghi789jkl012mno345pqr678stu901vwx234yz",
+    "expiresAt": "2026-02-28T10:30:00Z"
+  }
+}
+```
+
+**Response (Success - New User Auto-Registered - 201):**
+```json
+{
+  "success": true,
+  "message": "Account created and logged in successfully",
+  "isNewUser": true,
+  "data": {
+    "customerAccessToken": "abc123def456ghi789jkl012mno345pqr678stu901vwx234yz",
+    "expiresAt": "2026-02-28T10:30:00Z"
+  }
+}
+```
+
+**Response (Error - 400 - Missing Fields):**
+```json
+{
+  "success": false,
+  "message": "Phone number and password are required"
+}
+```
+
+**Response (Error - 400 - Password Too Short):**
+```json
+{
+  "success": false,
+  "message": "Password must be at least 5 characters long"
+}
+```
+
+**Response (Error - 400 - Wrong Password):**
+```json
+{
+  "success": false,
+  "message": "Login failed",
+  "errors": [
+    {
+      "code": "INVALID_CREDENTIALS",
+      "field": null,
+      "message": "Invalid credentials"
+    }
+  ]
+}
+```
+
+**Response (Error - 500):**
+```json
+{
+  "success": false,
+  "message": "Failed to login",
+  "error": "Error details..."
+}
+```
+
+### Notes
+
+- For new users, a unique email is auto-generated: `{phone_digits}@phone.user`
+- The phone number is stored in the customer's phone field in Shopify
+- Requires both Storefront API access token and Admin API access token
+- The `isNewUser` flag indicates whether this was a registration or login
+
+---
+
 ## Session Management
 
 ### Using Session Tokens

@@ -562,4 +562,407 @@ router.post("/logout", async (req, res) => {
   }
 });
 
+/**
+ * POST /login/shopify/email
+ * Login to Shopify using email and password
+ * If user doesn't exist, automatically registers them
+ * Returns customerAccessToken for Shopify Storefront API
+ */
+router.post("/shopify/email", async (req, res) => {
+  try {
+    const { email, password } = req.body;
+
+    // Validate input
+    if (!email || !password) {
+      return res.status(400).json({
+        success: false,
+        message: "Email and password are required",
+      });
+    }
+
+    // Validate password length (Shopify requires minimum 5 characters)
+    if (password.length < 5) {
+      return res.status(400).json({
+        success: false,
+        message: "Password must be at least 5 characters long",
+      });
+    }
+
+    const storefrontAPI = require("../config/shopify");
+
+    // Shopify Storefront API mutation for customer login
+    const loginMutation = `
+      mutation customerAccessTokenCreate($input: CustomerAccessTokenCreateInput!) {
+        customerAccessTokenCreate(input: $input) {
+          customerAccessToken {
+            accessToken
+            expiresAt
+          }
+          customerUserErrors {
+            code
+            field
+            message
+          }
+        }
+      }
+    `;
+
+    const loginVariables = {
+      input: {
+        email: email,
+        password: password,
+      },
+    };
+
+    // Try to login first
+    const loginResponse = await storefrontAPI.post("", { query: loginMutation, variables: loginVariables });
+
+    // Check for GraphQL errors
+    if (loginResponse.data.errors) {
+      return res.status(400).json({
+        success: false,
+        message: "Failed to login",
+        error: loginResponse.data.errors[0].message,
+      });
+    }
+
+    const { customerAccessToken, customerUserErrors } = loginResponse.data.data.customerAccessTokenCreate;
+
+    // Check if user doesn't exist (UNIDENTIFIED_CUSTOMER error)
+    if (customerUserErrors && customerUserErrors.length > 0) {
+      const isUnidentifiedCustomer = customerUserErrors.some(
+        (error) => error.code === "UNIDENTIFIED_CUSTOMER"
+      );
+
+      if (isUnidentifiedCustomer) {
+        // User doesn't exist, register them automatically
+        const registerMutation = `
+          mutation customerCreate($input: CustomerCreateInput!) {
+            customerCreate(input: $input) {
+              customer {
+                id
+                email
+                firstName
+                lastName
+              }
+              customerUserErrors {
+                code
+                field
+                message
+              }
+            }
+          }
+        `;
+
+        const registerVariables = {
+          input: {
+            email: email,
+            password: password,
+            firstName: "-",
+            lastName: "-",
+            acceptsMarketing: false,
+          },
+        };
+
+        const registerResponse = await storefrontAPI.post("", { 
+          query: registerMutation, 
+          variables: registerVariables 
+        });
+
+        // Check for registration errors
+        if (registerResponse.data.errors) {
+          return res.status(400).json({
+            success: false,
+            message: "Failed to register",
+            error: registerResponse.data.errors[0].message,
+          });
+        }
+
+        const { customer, customerUserErrors: registerErrors } = registerResponse.data.data.customerCreate;
+
+        if (registerErrors && registerErrors.length > 0) {
+          return res.status(400).json({
+            success: false,
+            message: "Registration failed",
+            errors: registerErrors,
+          });
+        }
+
+        if (!customer) {
+          return res.status(400).json({
+            success: false,
+            message: "Failed to create customer account",
+          });
+        }
+
+        // Now login the newly registered user
+        const newLoginResponse = await storefrontAPI.post("", { 
+          query: loginMutation, 
+          variables: loginVariables 
+        });
+
+        if (newLoginResponse.data.errors) {
+          return res.status(400).json({
+            success: false,
+            message: "Registration successful but login failed",
+            error: newLoginResponse.data.errors[0].message,
+          });
+        }
+
+        const { customerAccessToken: newAccessToken } = newLoginResponse.data.data.customerAccessTokenCreate;
+
+        if (!newAccessToken) {
+          return res.status(400).json({
+            success: false,
+            message: "Registration successful but failed to get access token",
+          });
+        }
+
+        // Return success for new user registration
+        return res.status(201).json({
+          success: true,
+          message: "Account created and logged in successfully",
+          isNewUser: true,
+          data: {
+            customerAccessToken: newAccessToken.accessToken,
+            expiresAt: newAccessToken.expiresAt,
+          },
+        });
+      }
+
+      // Other login errors (not UNIDENTIFIED_CUSTOMER)
+      return res.status(400).json({
+        success: false,
+        message: "Login failed",
+        errors: customerUserErrors,
+      });
+    }
+
+    // Check if token was created
+    if (!customerAccessToken) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid email or password",
+      });
+    }
+
+    // Return success for existing user login
+    return res.status(200).json({
+      success: true,
+      message: "Login successful",
+      isNewUser: false,
+      data: {
+        customerAccessToken: customerAccessToken.accessToken,
+        expiresAt: customerAccessToken.expiresAt,
+      },
+    });
+  } catch (error) {
+    console.error("Shopify email login error:", error.message);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to login",
+      error: error.message,
+    });
+  }
+});
+
+/**
+ * POST /login/shopify/mobile
+ * Login to Shopify using mobile number and password
+ * If user doesn't exist, automatically registers them
+ * Returns customerAccessToken for Shopify Storefront API
+ */
+router.post("/shopify/mobile", async (req, res) => {
+  try {
+    const { phone, password } = req.body;
+
+    // Validate input
+    if (!phone || !password) {
+      return res.status(400).json({
+        success: false,
+        message: "Phone number and password are required",
+      });
+    }
+
+    // Validate password length (Shopify requires minimum 5 characters)
+    if (password.length < 5) {
+      return res.status(400).json({
+        success: false,
+        message: "Password must be at least 5 characters long",
+      });
+    }
+
+    const storefrontAPI = require("../config/shopify");
+    const adminAPI = require("axios").create({
+      baseURL: `https://${process.env.SHOPIFY_STORE_URL}/admin/api/2025-01`,
+      headers: {
+        "X-Shopify-Access-Token": process.env.SHOPIFY_ADMIN_ACCESS_TOKEN,
+        "Content-Type": "application/json",
+      },
+    });
+
+    // First, try to find customer by phone number using Admin API
+    let customerId = null;
+    let customerEmail = null;
+    
+    try {
+      const searchResponse = await adminAPI.get(`/customers/search.json?query=phone:${encodeURIComponent(phone)}`);
+      
+      if (searchResponse.data.customers && searchResponse.data.customers.length > 0) {
+        const customer = searchResponse.data.customers[0];
+        customerId = customer.id;
+        customerEmail = customer.email;
+      }
+    } catch (searchError) {
+      console.error("Error searching for customer:", searchError.message);
+    }
+
+    // If customer exists, try to login with their email
+    if (customerEmail) {
+      const loginMutation = `
+        mutation customerAccessTokenCreate($input: CustomerAccessTokenCreateInput!) {
+          customerAccessTokenCreate(input: $input) {
+            customerAccessToken {
+              accessToken
+              expiresAt
+            }
+            customerUserErrors {
+              code
+              field
+              message
+            }
+          }
+        }
+      `;
+
+      const loginVariables = {
+        input: {
+          email: customerEmail,
+          password: password,
+        },
+      };
+
+      const loginResponse = await storefrontAPI.post("", { query: loginMutation, variables: loginVariables });
+
+      if (!loginResponse.data.errors) {
+        const { customerAccessToken, customerUserErrors } = loginResponse.data.data.customerAccessTokenCreate;
+
+        // If login successful
+        if (customerAccessToken && (!customerUserErrors || customerUserErrors.length === 0)) {
+          return res.status(200).json({
+            success: true,
+            message: "Login successful",
+            isNewUser: false,
+            data: {
+              customerAccessToken: customerAccessToken.accessToken,
+              expiresAt: customerAccessToken.expiresAt,
+            },
+          });
+        }
+      }
+    }
+
+    // Customer doesn't exist or login failed, register new customer
+    // Generate a unique email from phone number
+    const generatedEmail = `${phone.replace(/[^0-9]/g, '')}@phone.user`;
+
+    // Create customer using Admin API (Storefront API doesn't support phone-only registration)
+    const createCustomerPayload = {
+      customer: {
+        phone: phone,
+        email: generatedEmail,
+        first_name: "-",
+        last_name: "-",
+        verified_email: false,
+        accepts_marketing: false,
+        password: password,
+        password_confirmation: password,
+      },
+    };
+
+    try {
+      const createResponse = await adminAPI.post("/customers.json", createCustomerPayload);
+      
+      if (createResponse.data.customer) {
+        // Now login with the generated email
+        const loginMutation = `
+          mutation customerAccessTokenCreate($input: CustomerAccessTokenCreateInput!) {
+            customerAccessTokenCreate(input: $input) {
+              customerAccessToken {
+                accessToken
+                expiresAt
+              }
+              customerUserErrors {
+                code
+                field
+                message
+              }
+            }
+          }
+        `;
+
+        const loginVariables = {
+          input: {
+            email: generatedEmail,
+            password: password,
+          },
+        };
+
+        const loginResponse = await storefrontAPI.post("", { query: loginMutation, variables: loginVariables });
+
+        if (loginResponse.data.errors) {
+          return res.status(400).json({
+            success: false,
+            message: "Registration successful but login failed",
+            error: loginResponse.data.errors[0].message,
+          });
+        }
+
+        const { customerAccessToken } = loginResponse.data.data.customerAccessTokenCreate;
+
+        if (!customerAccessToken) {
+          return res.status(400).json({
+            success: false,
+            message: "Registration successful but failed to get access token",
+          });
+        }
+
+        return res.status(201).json({
+          success: true,
+          message: "Account created and logged in successfully",
+          isNewUser: true,
+          data: {
+            customerAccessToken: customerAccessToken.accessToken,
+            expiresAt: customerAccessToken.expiresAt,
+          },
+        });
+      }
+    } catch (createError) {
+      // Check if error is due to duplicate phone or email
+      if (createError.response && createError.response.data && createError.response.data.errors) {
+        return res.status(400).json({
+          success: false,
+          message: "Registration failed",
+          errors: createError.response.data.errors,
+        });
+      }
+      throw createError;
+    }
+
+    return res.status(400).json({
+      success: false,
+      message: "Failed to create customer account",
+    });
+
+  } catch (error) {
+    console.error("Shopify mobile login error:", error.message);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to login",
+      error: error.message,
+    });
+  }
+});
+
 module.exports = router;
+
