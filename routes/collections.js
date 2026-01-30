@@ -133,99 +133,164 @@ router.get("/:collectionHandle", verifyToken, async (req, res) => {
 
     // Fetch products in the collection
     const productsRes = await adminAPI.get(`/collections/${collectionId}/products.json?limit=${limit}`);
-    const products = productsRes.data.products || [];
+    const productIds = productsRes.data.products || [];
+
+    console.log(`Found ${productIds.length} products in collection`);
+
+    // Fetch full product details with variants for each product
+    const productDetailsPromises = productIds.map(p => 
+      adminAPI.get(`/products/${p.id}.json`)
+    );
+    
+    const productDetailsResponses = await Promise.all(productDetailsPromises);
+    const products = productDetailsResponses.map(res => res.data.product);
+
+    console.log("Raw product data for debugging:", JSON.stringify(products[0], null, 2));
 
     // Format products with full details
-    const formattedProducts = products.map(product => ({
-      id: `gid://shopify/Product/${product.id}`,
-      legacyResourceId: product.id,
-      title: product.title,
-      handle: product.handle,
-      description: product.body_html ? product.body_html.replace(/<[^>]*>/g, '') : null,
-      descriptionHtml: product.body_html,
-      productType: product.product_type,
-      vendor: product.vendor,
-      tags: product.tags ? product.tags.split(', ') : [],
-      createdAt: product.created_at,
-      updatedAt: product.updated_at,
-      publishedAt: product.published_at,
-      status: product.status,
-      availableForSale: product.status === 'active',
-      priceRange: {
-        minVariantPrice: {
-          amount: product.variants && product.variants.length > 0 
-            ? Math.min(...product.variants.map(v => parseFloat(v.price))).toFixed(2)
-            : "0.00",
-          currencyCode: "USD",
-        },
-        maxVariantPrice: {
-          amount: product.variants && product.variants.length > 0
-            ? Math.max(...product.variants.map(v => parseFloat(v.price))).toFixed(2)
-            : "0.00",
-          currencyCode: "USD",
-        },
-      },
-      compareAtPriceRange: {
-        minVariantPrice: {
-          amount: product.variants && product.variants.length > 0
-            ? Math.min(...product.variants.map(v => parseFloat(v.compare_at_price || v.price))).toFixed(2)
-            : "0.00",
-          currencyCode: "USD",
-        },
-        maxVariantPrice: {
-          amount: product.variants && product.variants.length > 0
-            ? Math.max(...product.variants.map(v => parseFloat(v.compare_at_price || v.price))).toFixed(2)
-            : "0.00",
-          currencyCode: "USD",
-        },
-      },
-      images: product.images ? product.images.map(img => ({
-        id: img.id,
-        url: img.src,
-        altText: img.alt,
-        width: img.width,
-        height: img.height,
-      })) : [],
-      variants: product.variants ? product.variants.map(variant => ({
-        id: `gid://shopify/ProductVariant/${variant.id}`,
-        legacyResourceId: variant.id,
-        title: variant.title,
-        sku: variant.sku,
-        availableForSale: variant.inventory_quantity > 0 || variant.inventory_policy === 'continue',
-        requiresShipping: variant.requires_shipping,
-        weight: variant.weight,
-        weightUnit: variant.weight_unit,
-        inventoryQuantity: variant.inventory_quantity,
-        price: {
-          amount: variant.price,
-          currencyCode: "USD",
-        },
-        compareAtPrice: variant.compare_at_price ? {
-          amount: variant.compare_at_price,
-          currencyCode: "USD",
-        } : null,
-        selectedOptions: variant.option1 || variant.option2 || variant.option3 ? [
-          variant.option1 ? { name: product.options[0]?.name || "Option 1", value: variant.option1 } : null,
-          variant.option2 ? { name: product.options[1]?.name || "Option 2", value: variant.option2 } : null,
-          variant.option3 ? { name: product.options[2]?.name || "Option 3", value: variant.option3 } : null,
-        ].filter(Boolean) : [],
-        image: variant.image_id && product.images ? {
-          id: variant.image_id,
-          url: product.images.find(img => img.id === variant.image_id)?.src,
-          altText: product.images.find(img => img.id === variant.image_id)?.alt,
-        } : null,
-      })) : [],
-      options: product.options ? product.options.map(opt => ({
-        id: opt.id,
-        name: opt.name,
-        values: opt.values,
-      })) : [],
-      metafields: null,
-      seo: {
+    const formattedProducts = products.map(product => {
+      console.log(`Processing product: ${product.title}`);
+      console.log(`Variants:`, product.variants);
+      
+      // Calculate prices properly, handling null values
+      const variantPrices = product.variants && product.variants.length > 0
+        ? product.variants.map(v => {
+            console.log(`Variant price raw: "${v.price}", type: ${typeof v.price}`);
+            const parsed = parseFloat(v.price);
+            console.log(`Parsed price: ${parsed}`);
+            return parsed;
+          }).filter(p => !isNaN(p) && p >= 0)
+        : [];
+      
+      const variantCompareAtPrices = product.variants && product.variants.length > 0
+        ? product.variants.map(v => {
+            const parsed = parseFloat(v.compare_at_price);
+            return isNaN(parsed) ? 0 : parsed;
+          }).filter(p => p > 0)
+        : [];
+
+      console.log(`Variant prices array:`, variantPrices);
+      console.log(`Variant compare prices array:`, variantCompareAtPrices);
+
+      const minPrice = variantPrices.length > 0 ? Math.min(...variantPrices).toFixed(2) : "0.00";
+      const maxPrice = variantPrices.length > 0 ? Math.max(...variantPrices).toFixed(2) : "0.00";
+      const minComparePrice = variantCompareAtPrices.length > 0 ? Math.min(...variantCompareAtPrices).toFixed(2) : minPrice;
+      const maxComparePrice = variantCompareAtPrices.length > 0 ? Math.max(...variantCompareAtPrices).toFixed(2) : maxPrice;
+
+      console.log(`Calculated prices - min: ${minPrice}, max: ${maxPrice}`);
+
+      // Calculate total inventory
+      const totalInventory = product.variants && product.variants.length > 0
+        ? product.variants.reduce((sum, v) => sum + (v.inventory_quantity || 0), 0)
+        : 0;
+
+      // Check if any variant allows continue selling when out of stock
+      const allowsBackorder = product.variants && product.variants.length > 0
+        ? product.variants.some(v => v.inventory_policy === 'continue')
+        : false;
+
+      // Determine stock status
+      const isInStock = totalInventory > 0 || allowsBackorder;
+      const stockStatus = isInStock 
+        ? (totalInventory > 0 ? 'in_stock' : 'orderable') 
+        : 'out_of_stock';
+
+      return {
+        id: `gid://shopify/Product/${product.id}`,
+        legacyResourceId: product.id,
         title: product.title,
-        description: product.body_html ? product.body_html.replace(/<[^>]*>/g, '').substring(0, 160) : null,
-      },
-    }));
+        handle: product.handle,
+        description: product.body_html ? product.body_html.replace(/<[^>]*>/g, '') : null,
+        descriptionHtml: product.body_html,
+        productType: product.product_type,
+        vendor: product.vendor,
+        tags: product.tags ? product.tags.split(', ') : [],
+        createdAt: product.created_at,
+        updatedAt: product.updated_at,
+        publishedAt: product.published_at,
+        status: product.status,
+        availableForSale: isInStock,
+        stockStatus: stockStatus,
+        totalInventory: totalInventory,
+        priceRange: {
+          minVariantPrice: {
+            amount: minPrice,
+            currencyCode: "USD",
+          },
+          maxVariantPrice: {
+            amount: maxPrice,
+            currencyCode: "USD",
+          },
+        },
+        compareAtPriceRange: {
+          minVariantPrice: {
+            amount: minComparePrice,
+            currencyCode: "USD",
+          },
+          maxVariantPrice: {
+            amount: maxComparePrice,
+            currencyCode: "USD",
+          },
+        },
+        images: product.images ? product.images.map(img => ({
+          id: img.id,
+          url: img.src,
+          altText: img.alt,
+          width: img.width,
+          height: img.height,
+        })) : [],
+        variants: product.variants ? product.variants.map(variant => {
+          const variantInventory = variant.inventory_quantity || 0;
+          const variantAllowsBackorder = variant.inventory_policy === 'continue';
+          const variantInStock = variantInventory > 0 || variantAllowsBackorder;
+          const variantStockStatus = variantInStock
+            ? (variantInventory > 0 ? 'in_stock' : 'orderable')
+            : 'out_of_stock';
+
+          return {
+            id: `gid://shopify/ProductVariant/${variant.id}`,
+            legacyResourceId: variant.id,
+            title: variant.title,
+            sku: variant.sku,
+            availableForSale: variantInStock,
+            stockStatus: variantStockStatus,
+            requiresShipping: variant.requires_shipping,
+            weight: variant.weight,
+            weightUnit: variant.weight_unit,
+            inventoryQuantity: variantInventory,
+            inventoryPolicy: variant.inventory_policy,
+            price: {
+              amount: parseFloat(variant.price || 0).toFixed(2),
+              currencyCode: "USD",
+            },
+            compareAtPrice: variant.compare_at_price ? {
+              amount: parseFloat(variant.compare_at_price).toFixed(2),
+              currencyCode: "USD",
+            } : null,
+            selectedOptions: variant.option1 || variant.option2 || variant.option3 ? [
+              variant.option1 ? { name: product.options[0]?.name || "Option 1", value: variant.option1 } : null,
+              variant.option2 ? { name: product.options[1]?.name || "Option 2", value: variant.option2 } : null,
+              variant.option3 ? { name: product.options[2]?.name || "Option 3", value: variant.option3 } : null,
+            ].filter(Boolean) : [],
+            image: variant.image_id && product.images ? {
+              id: variant.image_id,
+              url: product.images.find(img => img.id === variant.image_id)?.src,
+              altText: product.images.find(img => img.id === variant.image_id)?.alt,
+            } : null,
+          };
+        }) : [],
+        options: product.options ? product.options.map(opt => ({
+          id: opt.id,
+          name: opt.name,
+          values: opt.values,
+        })) : [],
+        metafields: null,
+        seo: {
+          title: product.title,
+          description: product.body_html ? product.body_html.replace(/<[^>]*>/g, '').substring(0, 160) : null,
+        },
+      };
+    });
 
     res.json({
       success: true,
