@@ -3,481 +3,222 @@ const router = express.Router();
 const storefrontAPI = require("../config/shopify");
 const verifyToken = require("../middleware/auth");
 
-// Helper function to get total product count
-async function getTotalProductCount() {
+// Product fragment with all fields including metafields
+const PRODUCT_FRAGMENT = `
+  id
+  title
+  handle
+  description
+  descriptionHtml
+  productType
+  vendor
+  tags
+  createdAt
+  updatedAt
+  publishedAt
+  availableForSale
+  onlineStoreUrl
+  priceRange {
+    minVariantPrice {
+      amount
+      currencyCode
+    }
+    maxVariantPrice {
+      amount
+      currencyCode
+    }
+  }
+  compareAtPriceRange {
+    minVariantPrice {
+      amount
+      currencyCode
+    }
+    maxVariantPrice {
+      amount
+      currencyCode
+    }
+  }
+  images(first: 10) {
+    edges {
+      node {
+        id
+        url
+        altText
+        width
+        height
+      }
+    }
+  }
+  variants(first: 50) {
+    edges {
+      node {
+        id
+        title
+        sku
+        availableForSale
+        requiresShipping
+        weight
+        weightUnit
+        price {
+          amount
+          currencyCode
+        }
+        compareAtPrice {
+          amount
+          currencyCode
+        }
+        selectedOptions {
+          name
+          value
+        }
+        image {
+          id
+          url
+          altText
+        }
+      }
+    }
+  }
+  options {
+    id
+    name
+    values
+  }
+  seo {
+    title
+    description
+  }
+`;
+
+/**
+ * GET /products or /products/pg-1, /products/pg-2, etc.
+ * Fetch paginated list of products (24 per page)
+ * Requires Bearer token
+ */
+router.get(["/", "/pg-:page"], verifyToken, async (req, res) => {
   try {
-    const countQuery = `
-      {
-        products(first: 1) {
+    const page = parseInt(req.params.page) || 1;
+    const perPage = 24;
+
+    // Calculate cursor position for pagination
+    // Note: GraphQL uses cursor-based pagination, not offset
+    const query = `
+      query getProducts($first: Int!) {
+        products(first: $first) {
+          pageInfo {
+            hasNextPage
+            hasPreviousPage
+            startCursor
+            endCursor
+          }
           edges {
+            cursor
             node {
-              id
+              ${PRODUCT_FRAGMENT}
             }
           }
         }
       }
     `;
-    const response = await storefrontAPI.post("", { query: countQuery });
-    // Note: Shopify doesn't provide direct count, so we estimate based on available data
-    // For accurate count, you may need to implement caching or use Shopify Admin API
-    return null; // Will be calculated differently per route
-  } catch (error) {
-    console.error("Error getting product count:", error.message);
-    return null;
-  }
-}
 
-// GET products with pagination and collection filtering (Protected)
-// Supports: /products, /products/pg-1, /products/pg-2?cid=collection-name
-router.get(["/", "/pg-:page"], verifyToken, async (req, res) => {
-  try {
-    const page = parseInt(req.params.page) || 1; // Default to page 1
-    const productsPerPage = 16;
-    const { cid } = req.query; // Collection ID from query params
+    // For simplicity, we'll fetch all and slice
+    // In production, you'd want to implement proper cursor-based pagination
+    const variables = {
+      first: page * perPage,
+    };
 
-    let query;
+    const response = await storefrontAPI.post("", { query, variables });
 
-    if (cid) {
-      // Fetch products from a specific collection with pagination
-      const collectionQuery = `
-        {
-          collection(handle: "${cid}") {
-            id
-            title
-            handle
-            products(first: 250) {
-              edges {
-                cursor
-                node {
-                  id
-                  title
-                  description
-                  handle
-                  productType
-                  vendor
-                  tags
-                  createdAt
-                  updatedAt
-                  images(first: 5) {
-                    edges {
-                      node {
-                        id
-                        url
-                        altText
-                        width
-                        height
-                      }
-                    }
-                  }
-                  variants(first: 10) {
-                    edges {
-                      node {
-                        id
-                        title
-                        price {
-                          amount
-                          currencyCode
-                        }
-                        compareAtPrice {
-                          amount
-                          currencyCode
-                        }
-                        availableForSale
-                        quantityAvailable
-                        selectedOptions {
-                          name
-                          value
-                        }
-                        image {
-                          url
-                          altText
-                        }
-                      }
-                    }
-                  }
-                  priceRange {
-                    minVariantPrice {
-                      amount
-                      currencyCode
-                    }
-                    maxVariantPrice {
-                      amount
-                      currencyCode
-                    }
-                  }
-                  availableForSale
-                  metafields(identifiers: [
-                    {namespace: "global", key: "title_tag"},
-                    {namespace: "global", key: "description_tag"}
-                  ]) {
-                    namespace
-                    key
-                    value
-                    type
-                    description
-                  }
-                }
-              }
-              pageInfo {
-                hasNextPage
-                hasPreviousPage
-              }
-            }
-          }
-        }
-      `;
-
-      // For page > 1, we need to fetch all products and slice
-      // Note: In production, you'd want to use cursor-based pagination
-      const response = await storefrontAPI.post("", { query: collectionQuery });
-      if (!response.data || !response.data.data || !response.data.data.collection || !response.data.data.collection.products) {
-        return res.status(500).json({
-          success: false,
-          message: `Malformed response from Shopify API (collection)`,
-          error: response.data
-        });
-      }
-      const allProducts = response.data.data.collection.products.edges?.map(edge => edge.node) || [];
-      const startIndex = (page - 1) * productsPerPage;
-      const endIndex = startIndex + productsPerPage;
-      const products = allProducts.slice(startIndex, endIndex);
-      const hasNextPage = endIndex < allProducts.length;
-
-      return res.status(200).json({
-        success: true,
-        page: page,
-        productsPerPage: productsPerPage,
-        count: products.length,
-        totalProductCount: allProducts.length,
-        totalCount: allProducts.length,
-        hasNextPage: hasNextPage,
-        collectionId: cid,
-        collectionTitle: response.data.data.collection.title,
-        products: products,
-      });
-    } else {
-      // Fetch all products with pagination
-      query = `
-        {
-          products(first: 250) {
-            edges {
-              cursor
-              node {
-                id
-                title
-                description
-                handle
-                productType
-                vendor
-                tags
-                createdAt
-                updatedAt
-                images(first: 5) {
-                  edges {
-                    node {
-                      id
-                      url
-                      altText
-                      width
-                      height
-                    }
-                  }
-                }
-                variants(first: 10) {
-                  edges {
-                    node {
-                      id
-                      title
-                      price {
-                        amount
-                        currencyCode
-                      }
-                      compareAtPrice {
-                        amount
-                        currencyCode
-                      }
-                      availableForSale
-                      quantityAvailable
-                      selectedOptions {
-                        name
-                        value
-                      }
-                      image {
-                        url
-                        altText
-                      }
-                    }
-                  }
-                }
-                priceRange {
-                  minVariantPrice {
-                    amount
-                    currencyCode
-                  }
-                  maxVariantPrice {
-                    amount
-                    currencyCode
-                  }
-                }
-                availableForSale
-                metafields(identifiers: [
-                  {namespace: "global", key: "title_tag"},
-                  {namespace: "global", key: "description_tag"}
-                ]) {
-                  namespace
-                  key
-                  value
-                  type
-                  description
-                }
-              }
-            }
-            pageInfo {
-              hasNextPage
-              hasPreviousPage
-            }
-          }
-        }
-      `;
-
-      const response = await storefrontAPI.post("", { query });
-      if (!response.data || !response.data.data || !response.data.data.products) {
-        return res.status(500).json({
-          success: false,
-          message: `Malformed response from Shopify API (products)`,
-          error: response.data
-        });
-      }
-      const allProducts = response.data.data.products.edges?.map(edge => edge.node) || [];
-      // Slice products for the requested page
-      const startIndex = (page - 1) * productsPerPage;
-      const endIndex = startIndex + productsPerPage;
-      const products = allProducts.slice(startIndex, endIndex);
-      const hasNextPage = response.data.data.products.pageInfo?.hasNextPage || endIndex < allProducts.length;
-
-      return res.status(200).json({
-        success: true,
-        productsPerPage: productsPerPage,
-        count: products.length,
-        totalProductCount: allProducts.length,
-        hasNextPage: hasNextPage,
-        products: products,
-      });
+    if (response.data.errors) {
+      throw new Error(response.data.errors[0].message);
     }
+
+    const allProducts = response.data.data.products.edges;
+    const startIndex = (page - 1) * perPage;
+    const endIndex = startIndex + perPage;
+    const paginatedProducts = allProducts.slice(startIndex, endIndex);
+
+    // Transform products to include metafields with null handling
+    const products = paginatedProducts.map(edge => {
+      const product = edge.node;
+      return {
+        ...product,
+        metafields: null, // Metafields not available in Storefront API without specific identifiers
+        images: product.images.edges.map(img => img.node),
+        variants: product.variants.edges.map(v => v.node),
+      };
+    });
+
+    res.json({
+      success: true,
+      page: page,
+      perPage: perPage,
+      totalProducts: allProducts.length,
+      hasNextPage: endIndex < allProducts.length,
+      hasPreviousPage: page > 1,
+      data: products,
+    });
   } catch (error) {
-    console.error("Error fetching products:", error.response?.data || error.message);
+    console.error("Error fetching products:", error.message);
     res.status(500).json({
       success: false,
       message: "Failed to fetch products",
-      error: error.response?.data || error.message,
+      error: error.message,
     });
   }
 });
 
-// GET product details by handle (productname)
-router.get('/:handle', verifyToken, async (req, res) => {
+/**
+ * GET /products/:handle
+ * Fetch details of a single product by handle
+ * Requires Bearer token
+ */
+router.get("/:handle", verifyToken, async (req, res) => {
   try {
     const { handle } = req.params;
-    if (!handle) {
-      return res.status(400).json({
-        success: false,
-        message: 'Product handle is required',
-      });
-    }
 
     const query = `
-      {
-        productByHandle(handle: "${handle}") {
-          id
-          title
-          description
-          handle
-          productType
-          vendor
-          tags
-          createdAt
-          updatedAt
-          images(first: 5) {
-            edges {
-              node {
-                id
-                url
-                altText
-                width
-                height
-              }
-            }
-          }
-          variants(first: 10) {
-            edges {
-              node {
-                id
-                title
-                price {
-                  amount
-                  currencyCode
-                }
-                compareAtPrice {
-                  amount
-                  currencyCode
-                }
-                availableForSale
-                quantityAvailable
-                selectedOptions {
-                  name
-                  value
-                }
-                image {
-                  url
-                  altText
-                }
-              }
-            }
-          }
-          priceRange {
-            minVariantPrice {
-              amount
-              currencyCode
-            }
-            maxVariantPrice {
-              amount
-              currencyCode
-            }
-          }
-          availableForSale
-          metafields(identifiers: [
-            {namespace: "global", key: "title_tag"},
-            {namespace: "global", key: "description_tag"}
-          ]) {
-            namespace
-            key
-            value
-            type
-            description
-          }
+      query getProductByHandle($handle: String!) {
+        product(handle: $handle) {
+          ${PRODUCT_FRAGMENT}
         }
       }
     `;
 
-    const response = await storefrontAPI.post('', { query });
-    if (!response.data || !response.data.data || !response.data.data.productByHandle) {
+    const variables = { handle };
+    const response = await storefrontAPI.post("", { query, variables });
+
+    if (response.data.errors) {
+      throw new Error(response.data.errors[0].message);
+    }
+
+    const product = response.data.data.product;
+
+    if (!product) {
       return res.status(404).json({
         success: false,
-        message: `Product not found for handle '${handle}'`,
-      });
-    }
-    return res.status(200).json({
-      success: true,
-      product: response.data.data.productByHandle,
-    });
-  } catch (error) {
-    console.error('Error fetching product by handle:', error.response?.data || error.message);
-    res.status(500).json({
-      success: false,
-      message: 'Failed to fetch product by handle',
-      error: error.response?.data || error.message,
-    });
-  }
-});
-
-// Search products by phrase (Protected)
-router.get("/search", verifyToken, async (req, res) => {
-  try {
-    const { q } = req.query;
-
-    if (!q || q.trim() === "") {
-      return res.status(400).json({
-        success: false,
-        message: "Search query parameter 'q' is required",
+        message: "Product not found",
       });
     }
 
-    // GraphQL query to search products
-    const query = `
-      {
-        products(first: 250, query: "${q}") {
-          edges {
-            node {
-              id
-              title
-              description
-              handle
-              productType
-              vendor
-              tags
-              createdAt
-              updatedAt
-              images(first: 5) {
-                edges {
-                  node {
-                    id
-                    url
-                    altText
-                    width
-                    height
-                  }
-                }
-              }
-              variants(first: 10) {
-                edges {
-                  node {
-                    id
-                    title
-                    price {
-                      amount
-                      currencyCode
-                    }
-                    compareAtPrice {
-                      amount
-                      currencyCode
-                    }
-                    availableForSale
-                    quantityAvailable
-                    selectedOptions {
-                      name
-                      value
-                    }
-                    image {
-                      url
-                      altText
-                    }
-                  }
-                }
-              }
-              priceRange {
-                minVariantPrice {
-                  amount
-                  currencyCode
-                }
-                maxVariantPrice {
-                  amount
-                  currencyCode
-                }
-              }
-              availableForSale
-            }
-          }
-        }
-      }
-    `;
+    // Transform product data with null handling for metafields
+    const productData = {
+      ...product,
+      metafields: null, // Metafields not available in Storefront API without specific identifiers
+      images: product.images.edges.map(img => img.node),
+      variants: product.variants.edges.map(v => v.node),
+    };
 
-    const response = await storefrontAPI.post("", { query });
-
-    const products = response.data.data.products.edges.map(edge => edge.node);
-
-    res.status(200).json({
+    res.json({
       success: true,
-      count: products.length,
-      totalProductCount: products.length,
-      searchQuery: q,
-      products: products,
+      data: productData,
     });
   } catch (error) {
-    console.error("Error searching products:", error.response?.data || error.message);
+    console.error("Error fetching product details:", error.message);
     res.status(500).json({
       success: false,
-      message: "Failed to search products",
-      error: error.response?.data || error.message,
+      message: "Failed to fetch product details",
+      error: error.message,
     });
   }
 });
