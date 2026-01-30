@@ -9,8 +9,11 @@ const {
 const {
   createCustomerAccessToken,
   createCustomer: createShopifyCustomer,
-  GetCustomerDataFromAccessToken
+  GetCustomerDataFromAccessToken,
+  customerAccessTokenCreateWithMultipass
 } = require("../utils/shopifyStorefront");
+
+var Multipassify = require('multipassify');
 
 // Helper: Login to Shopify Admin (returns session info or token)
 async function loginToShopifyAdmin(email, phone) {
@@ -101,6 +104,16 @@ router.post("/email/verify", async (req, res) => {
     // Login to Shopify Admin
     const shopifyAdminLogin = await loginToShopifyAdmin(email, null);
 
+    // login to shopify storefront using multipass
+    var multipassify = new Multipassify("a5392b72b7a290216db4d836d4882058");
+    // Create your customer data hash
+    var shopifyCustomerData = { email: email, remote_ip: '49.36.126.84', return_to: "http://localhost:3000" };
+
+    // Encode a Multipass token
+    var token = multipassify.encode(shopifyCustomerData);
+
+    const customerAccessToken = await customerAccessTokenCreateWithMultipass(token);
+
     return res.status(200).json({
       success: true,
       message: isNewCustomer ? "Account created successfully" : "Email verified successfully",
@@ -110,6 +123,7 @@ router.post("/email/verify", async (req, res) => {
       customer: customerData,
       isNewCustomer,
       shopifyAdmin: shopifyAdminLogin,
+      shopifyCustomerAccessToken: customerAccessToken?.accessToken?.accessToken,
     });
   } catch (error) {
     console.error("Email OTP verify error:", error);

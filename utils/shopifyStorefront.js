@@ -54,6 +54,55 @@ async function createCustomerAccessToken(email, password) {
 }
 
 /**
+ * Create a customer access token using multipass token (Login)
+ * @param {string} multipassToken - Multipass token
+ * @returns {Object} - Result containing token or errors
+ */
+async function customerAccessTokenCreateWithMultipass(multipassToken) {
+    const mutation = `
+    mutation customerAccessTokenCreateWithMultipass($multipassToken: String!) {
+  customerAccessTokenCreateWithMultipass(multipassToken: $multipassToken) {
+    customerAccessToken {
+      accessToken
+      expiresAt
+    }
+    customerUserErrors {
+      code
+      field
+      message
+    }
+  }
+}
+
+  `;
+
+    try {
+        const response = await storefrontAPI.post("", {
+            query: mutation,
+            variables: {
+                multipassToken: multipassToken,
+            },
+        });
+        const result = response.data.data.customerAccessTokenCreateWithMultipass;
+
+        if (result.customerUserErrors && result.customerUserErrors.length > 0) {
+            return {
+                success: false,
+                errors: result.customerUserErrors,
+            };
+        }
+
+        return {
+            success: true,
+            accessToken: result.customerAccessToken,
+        };
+    } catch (error) {
+        console.error("Error creating customer access token:", error.message);
+        throw error;
+    }
+}
+
+/**
  * Get customer data from a customer access token
  * @param {string} customerAccessToken - CustomerAccessToken
  * @returns {Object} - Result containing customer data or errors
@@ -154,6 +203,7 @@ async function createCustomer(customerData) {
 
 module.exports = {
     createCustomerAccessToken,
+    customerAccessTokenCreateWithMultipass,
     createCustomer,
     GetCustomerDataFromAccessToken
 };
