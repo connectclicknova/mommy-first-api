@@ -1,4 +1,5 @@
 const axios = require("axios");
+const storefrontAPI = require("../config/shopify");
 
 // Lazy initialization of Shopify Admin API
 let adminAPI = null;
@@ -379,8 +380,8 @@ async function updateCustomer(customerId, updateData) {
     const { firstName, lastName, email, phone, metafields: metafieldsToUpdate } = updateData;
 
     // Update basic customer fields if any provided
-    const hasBasicFields = firstName !== undefined || lastName !== undefined || 
-                           email !== undefined || phone !== undefined;
+    const hasBasicFields = firstName !== undefined || lastName !== undefined ||
+      email !== undefined || phone !== undefined;
 
     let updatedCustomer;
 
@@ -559,9 +560,9 @@ function formatAddress(address) {
 function formatCustomerResponse(customer) {
   // Format all addresses
   const formattedAddresses = (customer.addresses || []).map(formatAddress);
-  
+
   // Find default address from the list or use the default_address field
-  const defaultAddress = customer.default_address 
+  const defaultAddress = customer.default_address
     ? formatAddress(customer.default_address)
     : formattedAddresses.find(addr => addr?.isDefault) || null;
 
@@ -584,6 +585,55 @@ function formatCustomerResponse(customer) {
   };
 }
 
+/**
+ * Create a customer access token using multipass token (Login)
+ * @param {string} multipassToken - Multipass token
+ * @returns {Object} - Result containing token or errors
+ */
+async function customerAccessTokenCreateWithMultipass(multipassToken) {
+  const mutation = `
+    mutation customerAccessTokenCreateWithMultipass($multipassToken: String!) {
+  customerAccessTokenCreateWithMultipass(multipassToken: $multipassToken) {
+    customerAccessToken {
+      accessToken
+      expiresAt
+    }
+    customerUserErrors {
+      code
+      field
+      message
+    }
+  }
+}
+
+  `;
+
+  try {
+    const response = await storefrontAPI.post("", {
+      query: mutation,
+      variables: {
+        multipassToken: multipassToken,
+      },
+    });
+    const result = response.data.data.customerAccessTokenCreateWithMultipass;
+
+    if (result.customerUserErrors && result.customerUserErrors.length > 0) {
+      return {
+        success: false,
+        errors: result.customerUserErrors,
+      };
+    }
+
+    return {
+      success: true,
+      accessToken: result.customerAccessToken,
+    };
+  } catch (error) {
+    console.error("Error creating customer access token:", error.message);
+    throw error;
+  }
+}
+
 module.exports = {
   findCustomerByEmail,
   findCustomerByPhone,
@@ -604,4 +654,5 @@ module.exports = {
   formatCustomerResponse,
   formatAddress,
   formatMetafields,
+  customerAccessTokenCreateWithMultipass
 };

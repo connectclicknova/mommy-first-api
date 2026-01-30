@@ -604,9 +604,9 @@ function formatCartLineItem(line) {
       },
       image: merchandise.image
         ? {
-            url: merchandise.image.url,
-            altText: merchandise.image.altText,
-          }
+          url: merchandise.image.url,
+          altText: merchandise.image.altText,
+        }
         : null,
     },
     product: {
@@ -615,9 +615,9 @@ function formatCartLineItem(line) {
       handle: merchandise.product.handle,
       featuredImage: merchandise.product.featuredImage
         ? {
-            url: merchandise.product.featuredImage.url,
-            altText: merchandise.product.featuredImage.altText,
-          }
+          url: merchandise.product.featuredImage.url,
+          altText: merchandise.product.featuredImage.altText,
+        }
         : null,
     },
     lineCost: {
@@ -653,9 +653,9 @@ function formatCartResponse(cart) {
       },
       totalTax: cart.cost.totalTaxAmount
         ? {
-            amount: parseFloat(cart.cost.totalTaxAmount.amount),
-            currencyCode: cart.cost.totalTaxAmount.currencyCode,
-          }
+          amount: parseFloat(cart.cost.totalTaxAmount.amount),
+          currencyCode: cart.cost.totalTaxAmount.currencyCode,
+        }
         : null,
     },
   };
@@ -673,7 +673,7 @@ async function mergeCartsOnLogin(customerId, guestCartId, email = null) {
   try {
     // Get the guest cart items
     const guestCart = guestCartId ? await getCart(guestCartId) : null;
-    
+
     // Get or create the user's cart
     const userCart = await getOrCreateUserCart(customerId, email);
 
@@ -735,6 +735,65 @@ async function clearUserCart(customerId) {
   }
 }
 
+
+/**
+ * Update cart buyer identity and get checkout URL
+ * @param {string} cartId - Cart ID
+ * @param {string} customerAccessToken - Customer access token
+ * @returns {Object} - Updated cart object with checkout URL
+ */
+async function updateCartBuyerIdentity(cartId, customerAccessToken) {
+  try {
+    const mutation = `
+      mutation cartBuyerIdentityUpdate($cartId: ID!, $buyerIdentity: CartBuyerIdentityInput!) {
+        cartBuyerIdentityUpdate(cartId: $cartId, buyerIdentity: $buyerIdentity) {
+          cart {
+            id
+            checkoutUrl
+            buyerIdentity {
+              email
+              phone
+            }
+          }
+          userErrors {
+            field
+            message
+          }
+        }
+      }
+    `;
+
+    const response = await storefrontAPI.post("", {
+      query: mutation,
+      variables: {
+        cartId,
+        buyerIdentity: {
+          customerAccessToken,
+        },
+      },
+    });
+
+    if (response.data.errors) {
+      throw new Error(response.data.errors[0].message);
+    }
+
+    const { cart, userErrors } = response.data.data.cartBuyerIdentityUpdate;
+
+    if (userErrors && userErrors.length > 0) {
+      throw new Error(userErrors[0].message);
+    }
+
+    return {
+      cartId: cart.id,
+      checkoutUrl: cart.checkoutUrl,
+      buyerIdentity: cart.buyerIdentity,
+    };
+  } catch (error) {
+    console.error("Error updating cart buyer identity:", error.message);
+    throw error;
+  }
+}
+
 module.exports = {
   createCart,
   getCart,
@@ -747,4 +806,5 @@ module.exports = {
   getOrCreateUserCart,
   mergeCartsOnLogin,
   clearUserCart,
+  updateCartBuyerIdentity,
 };

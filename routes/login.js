@@ -5,7 +5,9 @@ const {
   findOrCreateCustomerByEmail,
   findOrCreateCustomerByPhone,
   formatCustomerResponse,
+  customerAccessTokenCreateWithMultipass
 } = require("../utils/customerService");
+const Multipassify = require("multipassify");
 
 // Helper: Login to Shopify Admin (returns session info or token)
 async function loginToShopifyAdmin(email, phone) {
@@ -96,6 +98,16 @@ router.post("/email/verify", async (req, res) => {
     // Login to Shopify Admin
     const shopifyAdminLogin = await loginToShopifyAdmin(email, null);
 
+    // login to shopify storefront using multipass
+    var multipassify = new Multipassify("a5392b72b7a290216db4d836d4882058");
+    // Create your customer data hash
+    var shopifyCustomerData = { email: email, remote_ip: '49.36.126.84', return_to: "http://localhost:3000" };
+
+    // Encode a Multipass token
+    var token = multipassify.encode(shopifyCustomerData);
+
+    const customerAccessToken = await customerAccessTokenCreateWithMultipass(token);
+
     return res.status(200).json({
       success: true,
       message: isNewCustomer ? "Account created successfully" : "Email verified successfully",
@@ -105,6 +117,7 @@ router.post("/email/verify", async (req, res) => {
       customer: customerData,
       isNewCustomer,
       shopifyAdmin: shopifyAdminLogin,
+      shopifyCustomerAccessToken: customerAccessToken?.accessToken?.accessToken,
     });
   } catch (error) {
     console.error("Email OTP verify error:", error);
@@ -332,7 +345,7 @@ router.post("/facebook/exchange", async (req, res) => {
     // Find or create customer in Shopify
     let customerData = null;
     let isNewCustomer = false;
-    
+
     // Get name from Descope response
     const descopeName = response.data.user?.name || "";
     const [descopeFirstName, ...descopeLastNameParts] = descopeName.split(" ");
@@ -664,9 +677,9 @@ router.post("/shopify/email", async (req, res) => {
           },
         };
 
-        const registerResponse = await storefrontAPI.post("", { 
-          query: registerMutation, 
-          variables: registerVariables 
+        const registerResponse = await storefrontAPI.post("", {
+          query: registerMutation,
+          variables: registerVariables
         });
 
         // Check for registration errors
@@ -696,9 +709,9 @@ router.post("/shopify/email", async (req, res) => {
         }
 
         // Now login the newly registered user
-        const newLoginResponse = await storefrontAPI.post("", { 
-          query: loginMutation, 
-          variables: loginVariables 
+        const newLoginResponse = await storefrontAPI.post("", {
+          query: loginMutation,
+          variables: loginVariables
         });
 
         if (newLoginResponse.data.errors) {
@@ -804,10 +817,10 @@ router.post("/shopify/mobile", async (req, res) => {
     // First, try to find customer by phone number using Admin API
     let customerId = null;
     let customerEmail = null;
-    
+
     try {
       const searchResponse = await adminAPI.get(`/customers/search.json?query=phone:${encodeURIComponent(phone)}`);
-      
+
       if (searchResponse.data.customers && searchResponse.data.customers.length > 0) {
         const customer = searchResponse.data.customers[0];
         customerId = customer.id;
@@ -882,7 +895,7 @@ router.post("/shopify/mobile", async (req, res) => {
 
     try {
       const createResponse = await adminAPI.post("/customers.json", createCustomerPayload);
-      
+
       if (createResponse.data.customer) {
         // Now login with the generated email
         const loginMutation = `
