@@ -99,7 +99,7 @@ router.post("/email/verify", async (req, res) => {
     const shopifyAdminLogin = await loginToShopifyAdmin(email, null);
 
     // login to shopify storefront using multipass
-    var multipassify = new Multipassify("a5392b72b7a290216db4d836d4882058");
+    var multipassify = new Multipassify(process.env.SHOPIFY_MULTIPASS_SECRET);
     // Create your customer data hash
     var shopifyCustomerData = { email: email, remote_ip: '49.36.126.84', return_to: "http://localhost:3000" };
 
