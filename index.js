@@ -10,6 +10,7 @@ const userRoutes = require("./routes/user");
 const cartRoutes = require("./routes/cart");
 const blogsRoutes = require("./routes/blogs");
 const collectionsRoutes = require("./routes/collections");
+const searchRoutes = require("./routes/search");
 
 // CORS Middleware
 app.use(cors({
@@ -35,6 +36,7 @@ app.use("/user", userRoutes);
 app.use("/cart", cartRoutes);
 app.use("/blogs", blogsRoutes);
 app.use("/collections", collectionsRoutes);
+app.use("/search", searchRoutes);
 
 // Start server (for local development)
 if (process.env.NODE_ENV !== 'production') {
