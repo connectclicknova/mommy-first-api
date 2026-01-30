@@ -145,12 +145,118 @@ router.get("/:collectionHandle", verifyToken, async (req, res) => {
     const productDetailsResponses = await Promise.all(productDetailsPromises);
     const products = productDetailsResponses.map(res => res.data.product);
 
+    // Fetch metafields for each product (to get bundle components)
+    const metafieldPromises = products.map(p =>
+      adminAPI.get(`/products/${p.id}/metafields.json`).catch(err => ({ data: { metafields: [] } }))
+    );
+    
+    const metafieldResponses = await Promise.all(metafieldPromises);
+    const productMetafields = metafieldResponses.map(res => res.data.metafields || []);
+
     console.log("Raw product data for debugging:", JSON.stringify(products[0], null, 2));
+    console.log("Metafields for first product:", JSON.stringify(productMetafields[0], null, 2));
 
     // Format products with full details
-    const formattedProducts = products.map(product => {
+    const formattedProducts = await Promise.all(products.map(async (product, index) => {
       console.log(`Processing product: ${product.title}`);
       console.log(`Variants:`, product.variants);
+
+      // Get metafields for this product
+      const metafields = productMetafields[index] || [];
+      
+      // Find bundle components using GraphQL
+      let bundleComponents = null;
+      
+      // Try to fetch bundle components using Shopify's native bundle structure
+      try {
+        const storefrontAPI = require("../config/shopify");
+        const bundleQuery = `
+          query getProductBundle($id: ID!) {
+            product(id: $id) {
+              id
+              title
+              hasVariantsThatRequiresComponents
+              bundleComponents {
+                product {
+                  id
+                  title
+                  handle
+                  description
+                  productType
+                  vendor
+                  priceRange {
+                    minVariantPrice {
+                      amount
+                      currencyCode
+                    }
+                    maxVariantPrice {
+                      amount
+                      currencyCode
+                    }
+                  }
+                  images(first: 5) {
+                    edges {
+                      node {
+                        id
+                        url
+                        altText
+                        width
+                        height
+                      }
+                    }
+                  }
+                  variants(first: 10) {
+                    edges {
+                      node {
+                        id
+                        title
+                        price {
+                          amount
+                          currencyCode
+                        }
+                        availableForSale
+                        sku
+                      }
+                    }
+                  }
+                }
+                quantity
+              }
+            }
+          }
+        `;
+        
+        const bundleRes = await storefrontAPI.post("", {
+          query: bundleQuery,
+          variables: { id: `gid://shopify/Product/${product.id}` }
+        });
+        
+        console.log(`Shopify bundle query result for ${product.title}:`, JSON.stringify(bundleRes.data, null, 2));
+        
+        if (bundleRes.data?.data?.product?.bundleComponents) {
+          const components = bundleRes.data.data.product.bundleComponents;
+          
+          bundleComponents = components.map(component => ({
+            id: component.product.id,
+            legacyResourceId: component.product.id.split('/').pop(),
+            title: component.product.title,
+            handle: component.product.handle,
+            description: component.product.description,
+            productType: component.product.productType,
+            vendor: component.product.vendor,
+            quantity: component.quantity,
+            priceRange: component.product.priceRange,
+            images: component.product.images.edges.map(edge => edge.node),
+            variants: component.product.variants.edges.map(edge => edge.node),
+          }));
+          
+          console.log(`Found ${bundleComponents.length} bundle components via GraphQL`);
+        }
+      } catch (err) {
+        console.error(`Error fetching bundle components via GraphQL:`, err.message);
+      }
+      
+      console.log(`Final bundle components for ${product.title}:`, bundleComponents);
       
       // Calculate prices properly, handling null values
       const variantPrices = product.variants && product.variants.length > 0
@@ -284,13 +390,14 @@ router.get("/:collectionHandle", verifyToken, async (req, res) => {
           name: opt.name,
           values: opt.values,
         })) : [],
+        bundleComponents: bundleComponents,
         metafields: null,
         seo: {
           title: product.title,
           description: product.body_html ? product.body_html.replace(/<[^>]*>/g, '').substring(0, 160) : null,
         },
       };
-    });
+    }));
 
     res.json({
       success: true,
