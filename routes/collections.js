@@ -84,14 +84,27 @@ router.get("/", verifyToken, async (req, res) => {
 });
 
 /**
- * GET /collections/:collectionHandle
+ * GET /collections/:collectionHandle or /collections/:collectionHandle/pg-:page
  * Fetch products from a specific collection with full details using Admin API
+ * Supports pagination with 24 products per page
  * Requires Bearer token
  */
+router.get("/:collectionHandle/pg-:page", verifyToken, async (req, res) => {
+  req.params.pageNumber = req.params.page;
+  return handleCollectionRequest(req, res);
+});
+
 router.get("/:collectionHandle", verifyToken, async (req, res) => {
+  req.params.pageNumber = "1"; // Default to page 1
+  return handleCollectionRequest(req, res);
+});
+
+async function handleCollectionRequest(req, res) {
   try {
-    const { collectionHandle } = req.params;
-    const limit = parseInt(req.query.limit) || 50;
+    const { collectionHandle, pageNumber } = req.params;
+    const page = parseInt(pageNumber) || 1;
+    const productsPerPage = 24;
+    const offset = (page - 1) * productsPerPage;
 
     // First, find the collection by handle
     let collection = null;
@@ -131,11 +144,22 @@ router.get("/:collectionHandle", verifyToken, async (req, res) => {
       });
     }
 
-    // Fetch products in the collection
-    const productsRes = await adminAPI.get(`/collections/${collectionId}/products.json?limit=${limit}`);
-    const productIds = productsRes.data.products || [];
+    // Fetch ALL products in the collection first (to get total count)
+    const allProductsRes = await adminAPI.get(`/collections/${collectionId}/products.json?limit=250`);
+    const allProductIds = allProductsRes.data.products || [];
 
-    console.log(`Found ${productIds.length} products in collection`);
+    console.log(`Found ${allProductIds.length} total products in collection`);
+
+    // Calculate pagination
+    const totalProducts = allProductIds.length;
+    const totalPages = Math.ceil(totalProducts / productsPerPage);
+    const hasNextPage = page < totalPages;
+    const hasPreviousPage = page > 1;
+
+    // Slice the products for current page
+    const productIds = allProductIds.slice(offset, offset + productsPerPage);
+
+    console.log(`Returning products ${offset + 1} to ${offset + productIds.length} (page ${page} of ${totalPages})`);
 
     // Fetch full product details with variants for each product
     const productDetailsPromises = productIds.map(p => 
@@ -422,7 +446,16 @@ router.get("/:collectionHandle", verifyToken, async (req, res) => {
           description: collection.body_html ? collection.body_html.replace(/<[^>]*>/g, '').substring(0, 160) : null,
         },
       },
-      totalProducts: formattedProducts.length,
+      pageInfo: {
+        currentPage: page,
+        totalPages: totalPages,
+        productsPerPage: productsPerPage,
+        totalProducts: totalProducts,
+        hasNextPage: hasNextPage,
+        hasPreviousPage: hasPreviousPage,
+        startCursor: offset + 1,
+        endCursor: offset + formattedProducts.length,
+      },
       data: formattedProducts,
     });
   } catch (error) {
@@ -433,6 +466,6 @@ router.get("/:collectionHandle", verifyToken, async (req, res) => {
       error: error.message,
     });
   }
-});
+}
 
 module.exports = router;
