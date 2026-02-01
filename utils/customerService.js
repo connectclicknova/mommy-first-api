@@ -1,5 +1,6 @@
 const axios = require("axios");
 const storefrontAPI = require("../config/shopify");
+const Multipassify = require("multipassify");
 
 // Lazy initialization of Shopify Admin API
 let adminAPI = null;
@@ -427,6 +428,30 @@ async function updateCustomer(customerId, updateData) {
 }
 
 /**
+ * Update customer details
+ * @param {number} customerId - Shopify customer ID
+ * @param {string} multipass_identifier - Multipass identifier to update
+ * @returns {Object} - Updated customer object with metafields
+ */
+async function updateCustomerMultipassIdentifier(customerId, multipass_identifier) {
+  try {
+
+    const customer = {
+      customer: {
+        id: customerId,
+        multipass_identifier: multipass_identifier
+      },
+    };
+
+    const response = await getAdminAPI().put(`/customers/${customerId}.json`, customer);
+    return response.data;
+  } catch (error) {
+    console.error("Error updating customer multipass_identifier:", error.response?.data || error.message);
+    throw error;
+  }
+}
+
+/**
  * Find or create customer by email
  * @param {string} email - Customer email
  * @param {string} firstName - Customer first name (optional)
@@ -587,10 +612,13 @@ function formatCustomerResponse(customer) {
 
 /**
  * Create a customer access token using multipass token (Login)
- * @param {string} multipassToken - Multipass token
+ * @param {string} email - Customer email
+ * @param {string} phone - Customer phone
+ * @param {string} identifier - Customer unique identifier
  * @returns {Object} - Result containing token or errors
  */
-async function customerAccessTokenCreateWithMultipass(multipassToken) {
+async function customerAccessTokenCreateWithMultipass(email, phone, identifier) {
+  
   const mutation = `
     mutation customerAccessTokenCreateWithMultipass($multipassToken: String!) {
   customerAccessTokenCreateWithMultipass(multipassToken: $multipassToken) {
@@ -609,14 +637,35 @@ async function customerAccessTokenCreateWithMultipass(multipassToken) {
   `;
 
   try {
+
+    // login to shopify storefront using multipass
+      const multipassify = new Multipassify(process.env.SHOPIFY_MULTIPASS_SECRET);
+      // Create your customer data hash
+      let shopifyCustomerData = {};
+      if (email) {
+        shopifyCustomerData.email = email;
+      }
+
+      if (phone) {
+        shopifyCustomerData.phone = phone;
+      }
+
+      if (identifier) {
+        shopifyCustomerData.identifier = identifier;
+      }
+  
+      // Encode a Multipass token
+      const token = multipassify.encode(shopifyCustomerData);
+
     const response = await storefrontAPI.post("", {
       query: mutation,
       variables: {
-        multipassToken: multipassToken,
+        multipassToken: token,
       },
     });
     const result = response.data.data.customerAccessTokenCreateWithMultipass;
-
+    // console.log("Multipass login Request:", JSON.stringify(shopifyCustomerData));
+    // console.log("Multipass login response:", JSON.stringify(result));
     if (result.customerUserErrors && result.customerUserErrors.length > 0) {
       return {
         success: false,
@@ -654,5 +703,6 @@ module.exports = {
   formatCustomerResponse,
   formatAddress,
   formatMetafields,
-  customerAccessTokenCreateWithMultipass
+  customerAccessTokenCreateWithMultipass,
+  updateCustomerMultipassIdentifier
 };

@@ -5,7 +5,8 @@ const {
   findOrCreateCustomerByEmail,
   findOrCreateCustomerByPhone,
   formatCustomerResponse,
-  customerAccessTokenCreateWithMultipass
+  customerAccessTokenCreateWithMultipass,
+  updateCustomerMultipassIdentifier
 } = require("../utils/customerService");
 const Multipassify = require("multipassify");
 
@@ -98,15 +99,15 @@ router.post("/email/verify", async (req, res) => {
     // Login to Shopify Admin
     const shopifyAdminLogin = await loginToShopifyAdmin(email, null);
 
-    // login to shopify storefront using multipass
-    var multipassify = new Multipassify(process.env.SHOPIFY_MULTIPASS_SECRET);
-    // Create your customer data hash
-    var shopifyCustomerData = { email: email };
+    // update the multipass_identifier for the existing customers
+    try {
+      const identifierUpdateResult = await updateCustomerMultipassIdentifier(customerData.id, response.data.user.userId);
+      console.log(identifierUpdateResult)
+    } catch (updateError) {
+      console.error("Error updating multipass_identifier for existing customer:", updateError.message);
+    }
 
-    // Encode a Multipass token
-    var token = multipassify.encode(shopifyCustomerData);
-
-    const customerAccessToken = await customerAccessTokenCreateWithMultipass(token);
+    const customerAccessToken = await customerAccessTokenCreateWithMultipass(email, null);
 
     return res.status(200).json({
       success: true,
@@ -176,7 +177,7 @@ router.post("/mobile/verify", async (req, res) => {
     let customerData = null;
     let isNewCustomer = false;
     try {
-      const result = await findOrCreateCustomerByPhone(phone, firstName || "", lastName || "");
+      const result = await findOrCreateCustomerByPhone(phone, firstName || "", lastName || "", response.data.user.userId);
       customerData = formatCustomerResponse(result.customer);
       isNewCustomer = result.isNewCustomer;
     } catch (customerError) {
@@ -184,8 +185,20 @@ router.post("/mobile/verify", async (req, res) => {
       // Continue with login even if customer service fails
     }
 
+    // update the multipass_identifier for the existing customers
+    try {
+      const identifierUpdateResult = await updateCustomerMultipassIdentifier(customerData.id, response.data.user.userId);
+      console.log(identifierUpdateResult)
+    } catch (updateError) {
+      console.error("Error updating multipass_identifier for existing customer:", updateError.message);
+    }
+
     // Login to Shopify Admin
     const shopifyAdminLogin = await loginToShopifyAdmin(null, phone);
+
+    // Create Shopify customer access token with Multipass
+    const emailForMultipass = customerData?.email || `${phone.replace(/[^0-9]/g, '')}@mommyfirst.com`;
+    const customerAccessToken = await customerAccessTokenCreateWithMultipass(emailForMultipass, phone, response.data.user.userId);
 
     return res.status(200).json({
       success: true,
@@ -195,7 +208,8 @@ router.post("/mobile/verify", async (req, res) => {
       user: response.data.user,
       customer: customerData,
       isNewCustomer,
-      shopifyAdmin: shopifyAdminLogin
+      shopifyAdmin: shopifyAdminLogin,
+      shopifyCustomerAccessToken: customerAccessToken?.accessToken?.accessToken,
     });
   } catch (error) {
     console.error("Mobile OTP verify error:", error);
@@ -252,6 +266,7 @@ router.post("/google/exchange", async (req, res) => {
 
     // Get email from Descope user data
     const userEmail = response.data.user?.email;
+    const userId = response.data.user?.userId;
 
     // Find or create customer in Shopify
     let customerData = null;
@@ -275,6 +290,15 @@ router.post("/google/exchange", async (req, res) => {
     // Login to Shopify Admin
     const shopifyAdminLogin = await loginToShopifyAdmin(userEmail, null);
 
+    // update the multipass_identifier for the existing customers
+    try {
+      const identifierUpdateResult = await updateCustomerMultipassIdentifier(customerData.id, userId);
+      console.log(identifierUpdateResult)
+    } catch (updateError) {
+      console.error("Error updating multipass_identifier for existing customer:", updateError.message);
+    }
+    // Create Shopify customer access token with Multipass
+    const customerAccessToken = await customerAccessTokenCreateWithMultipass(customerData.email, null, userId);
     return res.status(200).json({
       success: true,
       message: isNewCustomer ? "Account created successfully" : "Google login successful",
@@ -284,6 +308,7 @@ router.post("/google/exchange", async (req, res) => {
       customer: customerData,
       isNewCustomer,
       shopifyAdmin: shopifyAdminLogin,
+      shopifyCustomerAccessToken: customerAccessToken?.accessToken?.accessToken,
     });
   } catch (error) {
     console.error("Google OAuth exchange error:", error);
@@ -341,6 +366,7 @@ router.post("/facebook/exchange", async (req, res) => {
     // Get email and phone from Descope user data
     const userEmail = response.data.user?.email;
     const userPhone = response.data.user?.phone;
+    const userId = response.data.user?.userId;
 
     // Find or create customer in Shopify
     let customerData = null;
@@ -382,6 +408,17 @@ router.post("/facebook/exchange", async (req, res) => {
     // Login to Shopify Admin
     const shopifyAdminLogin = await loginToShopifyAdmin(userEmail, userPhone);
 
+    // update the multipass_identifier for the existing customers
+    try {
+      const identifierUpdateResult = await updateCustomerMultipassIdentifier(customerData.id, userId);
+      console.log(identifierUpdateResult)
+    } catch (updateError) {
+      console.error("Error updating multipass_identifier for existing customer:", updateError.message);
+    }
+    // Create Shopify customer access token with Multipass
+    const emailForMultipass = customerData?.email || `${phone.replace(/[^0-9]/g, '')}@mommyfirst.com`;
+    const customerAccessToken = await customerAccessTokenCreateWithMultipass(emailForMultipass, userPhone, userId);
+
     return res.status(200).json({
       success: true,
       message: isNewCustomer ? "Account created successfully" : "Facebook login successful",
@@ -391,6 +428,7 @@ router.post("/facebook/exchange", async (req, res) => {
       customer: customerData,
       isNewCustomer,
       shopifyAdmin: shopifyAdminLogin,
+      shopifyCustomerAccessToken: customerAccessToken?.accessToken?.accessToken,
     });
   } catch (error) {
     console.error("Facebook OAuth exchange error:", error);
@@ -447,6 +485,7 @@ router.post("/apple/exchange", async (req, res) => {
 
     // Get email from Descope user data
     const userEmail = response.data.user?.email;
+    const userId = response.data.user?.userId;
 
     // Find or create customer in Shopify
     let customerData = null;
@@ -470,6 +509,18 @@ router.post("/apple/exchange", async (req, res) => {
     // Login to Shopify Admin
     const shopifyAdminLogin = await loginToShopifyAdmin(userEmail, null);
 
+    // update the multipass_identifier for the existing customers
+    try {
+      const identifierUpdateResult = await updateCustomerMultipassIdentifier(customerData.id, userId);
+      console.log(identifierUpdateResult)
+    } catch (updateError) {
+      console.error("Error updating multipass_identifier for existing customer:", updateError.message);
+    }
+    // Create Shopify customer access token with Multipass
+    const emailForMultipass = customerData?.email || `${phone.replace(/[^0-9]/g, '')}@mommyfirst.com`;
+    const customerAccessToken = await customerAccessTokenCreateWithMultipass(emailForMultipass, null, userId);
+
+
     return res.status(200).json({
       success: true,
       message: isNewCustomer ? "Account created successfully" : "Apple login successful",
@@ -479,6 +530,7 @@ router.post("/apple/exchange", async (req, res) => {
       customer: customerData,
       isNewCustomer,
       shopifyAdmin: shopifyAdminLogin,
+      shopifyCustomerAccessToken: customerAccessToken?.accessToken?.accessToken,
     });
   } catch (error) {
     console.error("Apple OAuth exchange error:", error);
@@ -580,6 +632,7 @@ router.post("/logout", async (req, res) => {
  * Login to Shopify using email and password
  * If user doesn't exist, automatically registers them
  * Returns customerAccessToken for Shopify Storefront API
+ * Note: DEPRECATED - We are using descope OTP for mobile login instead
  */
 router.post("/shopify/email", async (req, res) => {
   try {
@@ -784,6 +837,7 @@ router.post("/shopify/email", async (req, res) => {
  * Login to Shopify using mobile number and password
  * If user doesn't exist, automatically registers them
  * Returns customerAccessToken for Shopify Storefront API
+ * Note: DEPRECATED - We are using descope OTP for mobile login instead
  */
 router.post("/shopify/mobile", async (req, res) => {
   try {
