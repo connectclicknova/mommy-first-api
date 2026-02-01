@@ -101,7 +101,7 @@ router.post("/email/verify", async (req, res) => {
     // login to shopify storefront using multipass
     var multipassify = new Multipassify(process.env.SHOPIFY_MULTIPASS_SECRET);
     // Create your customer data hash
-    var shopifyCustomerData = { email: email, remote_ip: '49.36.126.84', return_to: "http://localhost:3000" };
+    var shopifyCustomerData = { email: email };
 
     // Encode a Multipass token
     var token = multipassify.encode(shopifyCustomerData);
@@ -195,7 +195,7 @@ router.post("/mobile/verify", async (req, res) => {
       user: response.data.user,
       customer: customerData,
       isNewCustomer,
-      shopifyAdmin: shopifyAdminLogin,
+      shopifyAdmin: shopifyAdminLogin
     });
   } catch (error) {
     console.error("Mobile OTP verify error:", error);
