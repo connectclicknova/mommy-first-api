@@ -30,9 +30,23 @@ router.get("/", verifyToken, async (req, res) => {
     const customCollections = customCollectionsRes.data.custom_collections || [];
     const smartCollections = smartCollectionsRes.data.smart_collections || [];
 
+    // Fetch metafields for all collections
+    const allCollectionIds = [
+      ...customCollections.map(c => c.id),
+      ...smartCollections.map(c => c.id)
+    ];
+
+    const collectionMetafieldPromises = allCollectionIds.map(id =>
+      adminAPI.get(`/collections/${id}/metafields.json?limit=250`)
+        .then(res => res.data.metafields || [])
+        .catch(err => [])
+    );
+
+    const allCollectionMetafields = await Promise.all(collectionMetafieldPromises);
+
     // Combine and format collections
     const allCollections = [
-      ...customCollections.map(col => ({
+      ...customCollections.map((col, index) => ({
         id: `gid://shopify/Collection/${col.id}`,
         legacyResourceId: col.id,
         title: col.title,
@@ -47,25 +61,48 @@ router.get("/", verifyToken, async (req, res) => {
           width: col.image.width,
           height: col.image.height,
         } : null,
+        metafields: allCollectionMetafields[index].length > 0 
+          ? allCollectionMetafields[index].map(mf => ({
+              id: mf.id,
+              namespace: mf.namespace,
+              key: mf.key,
+              value: mf.value || '',
+              type: mf.type || mf.value_type,
+              description: mf.description || null,
+            }))
+          : [],
         type: 'custom',
       })),
-      ...smartCollections.map(col => ({
-        id: `gid://shopify/Collection/${col.id}`,
-        legacyResourceId: col.id,
-        title: col.title,
-        handle: col.handle,
-        description: col.body_html ? col.body_html.replace(/<[^>]*>/g, '') : null,
-        descriptionHtml: col.body_html,
-        updatedAt: col.updated_at,
-        image: col.image ? {
-          id: col.image.id,
-          url: col.image.src,
-          altText: col.image.alt,
-          width: col.image.width,
-          height: col.image.height,
-        } : null,
-        type: 'smart',
-      })),
+      ...smartCollections.map((col, index) => {
+        const metafieldIndex = customCollections.length + index;
+        return {
+          id: `gid://shopify/Collection/${col.id}`,
+          legacyResourceId: col.id,
+          title: col.title,
+          handle: col.handle,
+          description: col.body_html ? col.body_html.replace(/<[^>]*>/g, '') : null,
+          descriptionHtml: col.body_html,
+          updatedAt: col.updated_at,
+          image: col.image ? {
+            id: col.image.id,
+            url: col.image.src,
+            altText: col.image.alt,
+            width: col.image.width,
+            height: col.image.height,
+          } : null,
+          metafields: allCollectionMetafields[metafieldIndex].length > 0
+            ? allCollectionMetafields[metafieldIndex].map(mf => ({
+                id: mf.id,
+                namespace: mf.namespace,
+                key: mf.key,
+                value: mf.value || '',
+                type: mf.type || mf.value_type,
+                description: mf.description || null,
+              }))
+            : [],
+          type: 'smart',
+        };
+      }),
     ];
 
     res.json({
@@ -171,20 +208,14 @@ async function handleCollectionRequest(req, res) {
 
     // Fetch metafields for each product (to get bundle components)
     const metafieldPromises = products.map(p =>
-      adminAPI.get(`/products/${p.id}/metafields.json`).catch(err => ({ data: { metafields: [] } }))
+      adminAPI.get(`/products/${p.id}/metafields.json?limit=250`).catch(err => ({ data: { metafields: [] } }))
     );
     
     const metafieldResponses = await Promise.all(metafieldPromises);
     const productMetafields = metafieldResponses.map(res => res.data.metafields || []);
 
-    console.log("Raw product data for debugging:", JSON.stringify(products[0], null, 2));
-    console.log("Metafields for first product:", JSON.stringify(productMetafields[0], null, 2));
-
     // Format products with full details
     const formattedProducts = await Promise.all(products.map(async (product, index) => {
-      console.log(`Processing product: ${product.title}`);
-      console.log(`Variants:`, product.variants);
-
       // Get metafields for this product
       const metafields = productMetafields[index] || [];
       
@@ -415,13 +446,29 @@ async function handleCollectionRequest(req, res) {
           values: opt.values,
         })) : [],
         bundleComponents: bundleComponents,
-        metafields: null,
+        metafields: metafields.length > 0 ? metafields.map(mf => ({
+          id: mf.id,
+          namespace: mf.namespace,
+          key: mf.key,
+          value: mf.value || '',
+          type: mf.type || mf.value_type,
+          description: mf.description || null,
+        })) : [],
         seo: {
           title: product.title,
           description: product.body_html ? product.body_html.replace(/<[^>]*>/g, '').substring(0, 160) : null,
         },
       };
     }));
+
+    // Fetch metafields for the collection itself
+    let collectionMetafields = [];
+    try {
+      const collectionMetafieldsRes = await adminAPI.get(`/collections/${collectionId}/metafields.json?limit=250`);
+      collectionMetafields = collectionMetafieldsRes.data.metafields || [];
+    } catch (metaError) {
+      console.error(`Error fetching collection metafields:`, metaError.message);
+    }
 
     res.json({
       success: true,
@@ -440,6 +487,16 @@ async function handleCollectionRequest(req, res) {
           width: collection.image.width,
           height: collection.image.height,
         } : null,
+        metafields: collectionMetafields.length > 0 
+          ? collectionMetafields.map(mf => ({
+              id: mf.id,
+              namespace: mf.namespace,
+              key: mf.key,
+              value: mf.value || '',
+              type: mf.type || mf.value_type,
+              description: mf.description || null,
+            }))
+          : [],
         type: collectionType,
         seo: {
           title: collection.title,
