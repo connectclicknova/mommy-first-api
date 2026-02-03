@@ -12,6 +12,7 @@ const blogsRoutes = require("./routes/blogs");
 const collectionsRoutes = require("./routes/collections");
 const searchRoutes = require("./routes/search");
 const ordersRoutes = require("./routes/orders");
+const wishlistRoutes = require("./routes/wishlist");
 
 // CORS Middleware
 app.use(cors({
@@ -39,6 +40,7 @@ app.use("/blogs", blogsRoutes);
 app.use("/collections", collectionsRoutes);
 app.use("/search", searchRoutes);
 app.use("/orders", ordersRoutes);
+app.use("/wishlist", wishlistRoutes);
 
 // Start server (for local development)
 if (process.env.NODE_ENV !== 'production') {
