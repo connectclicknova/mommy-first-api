@@ -35,18 +35,36 @@ async function getCustomerOrders(customerId, options = {}) {
 
     const orders = response.data.orders || [];
 
-    // Fetch metafields for each order
-    const ordersWithMetafields = await Promise.all(
+    // Fetch metafields and product details for each order
+    const ordersWithDetails = await Promise.all(
       orders.map(async (order) => {
         const metafields = await getOrderMetafields(order.id);
+        
+        // Fetch line item metafields and product details
+        const lineItemsWithDetails = await Promise.all(
+          (order.line_items || []).map(async (lineItem) => {
+            const lineItemMetafields = await getLineItemMetafields(lineItem.id);
+            const productDetails = lineItem.product_id 
+              ? await getProductDetails(lineItem.product_id) 
+              : null;
+            
+            return {
+              ...lineItem,
+              metafields: lineItemMetafields,
+              product_details: productDetails,
+            };
+          })
+        );
+
         return {
           ...order,
           metafields,
+          line_items: lineItemsWithDetails,
         };
       })
     );
 
-    return ordersWithMetafields;
+    return ordersWithDetails;
   } catch (error) {
     console.error("Error fetching customer orders:", error.response?.data || error.message);
     throw error;
@@ -270,6 +288,8 @@ function formatOrderResponse(order) {
       gift_card: item.gift_card,
       name: item.name,
       properties: item.properties,
+      image: item.product_details?.images?.[0] || null,
+      images: item.product_details?.images || [],
       metafields: item.metafields || [],
       product_details: item.product_details || null,
     })),

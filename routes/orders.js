@@ -10,7 +10,8 @@ const {
 
 /**
  * GET /orders/customer/:customerId
- * Get all orders for a specific customer with metafields
+ * Get all orders for a specific customer with complete details
+ * Includes product details, metafields, fulfillment status, tracking, etc.
  */
 router.get("/customer/:customerId", verifyToken, async (req, res) => {
   try {
@@ -25,14 +26,14 @@ router.get("/customer/:customerId", verifyToken, async (req, res) => {
       });
     }
 
-    // Get customer orders with metafields
+    // Get customer orders with metafields and product details
     const orders = await getCustomerOrders(customerId, {
       limit: limit ? parseInt(limit) : 50,
       status: status || "any",
     });
 
-    // Format orders list
-    const formattedOrders = formatOrdersListResponse(orders);
+    // Format orders with complete details (product details, fulfillment, tracking, etc.)
+    const formattedOrders = orders.map(order => formatOrderResponse(order));
 
     return res.status(200).json({
       success: true,
