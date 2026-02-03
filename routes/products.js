@@ -2,6 +2,16 @@ const express = require("express");
 const router = express.Router();
 const storefrontAPI = require("../config/shopify");
 const verifyToken = require("../middleware/auth");
+const axios = require("axios");
+
+// Admin API instance for fetching metafields
+const adminAPI = axios.create({
+  baseURL: `https://${process.env.SHOPIFY_STORE_URL}/admin/api/2025-01`,
+  headers: {
+    "X-Shopify-Access-Token": process.env.SHOPIFY_ADMIN_ACCESS_TOKEN,
+    "Content-Type": "application/json",
+  },
+});
 
 // Product fragment with all fields including metafields
 const PRODUCT_FRAGMENT = `
@@ -138,12 +148,31 @@ router.get(["/", "/pg-:page"], verifyToken, async (req, res) => {
     const endIndex = startIndex + perPage;
     const paginatedProducts = allProducts.slice(startIndex, endIndex);
 
-    // Transform products to include metafields with null handling
-    const products = paginatedProducts.map(edge => {
+    // Fetch metafields for each product using Admin API
+    const metafieldPromises = paginatedProducts.map(edge => {
+      const productId = edge.node.id.split('/').pop();
+      return adminAPI.get(`/products/${productId}/metafields.json?limit=250`)
+        .then(res => res.data.metafields || [])
+        .catch(err => []);
+    });
+    
+    const allMetafields = await Promise.all(metafieldPromises);
+
+    // Transform products to include metafields
+    const products = paginatedProducts.map((edge, index) => {
       const product = edge.node;
+      const metafields = allMetafields[index] || [];
+      
       return {
         ...product,
-        metafields: null, // Metafields not available in Storefront API without specific identifiers
+        metafields: metafields.length > 0 ? metafields.map(mf => ({
+          id: mf.id,
+          namespace: mf.namespace,
+          key: mf.key,
+          value: mf.value || '',
+          type: mf.type || mf.value_type,
+          description: mf.description || null,
+        })) : [],
         images: product.images.edges.map(img => img.node),
         variants: product.variants.edges.map(v => v.node),
       };
@@ -201,10 +230,27 @@ router.get("/:handle", verifyToken, async (req, res) => {
       });
     }
 
-    // Transform product data with null handling for metafields
+    // Fetch metafields using Admin API
+    let metafields = [];
+    try {
+      const productId = product.id.split('/').pop();
+      const metafieldsResponse = await adminAPI.get(`/products/${productId}/metafields.json?limit=250`);
+      metafields = metafieldsResponse.data.metafields || [];
+    } catch (metaError) {
+      console.error(`Error fetching metafields:`, metaError.message);
+    }
+
+    // Transform product data with metafields
     const productData = {
       ...product,
-      metafields: null, // Metafields not available in Storefront API without specific identifiers
+      metafields: metafields.length > 0 ? metafields.map(mf => ({
+        id: mf.id,
+        namespace: mf.namespace,
+        key: mf.key,
+        value: mf.value || '',
+        type: mf.type || mf.value_type,
+        description: mf.description || null,
+      })) : [],
       images: product.images.edges.map(img => img.node),
       variants: product.variants.edges.map(v => v.node),
     };
