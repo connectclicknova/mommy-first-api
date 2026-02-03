@@ -1,6 +1,16 @@
 const express = require("express");
 const router = express.Router();
 const storefrontAPI = require("../config/shopify");
+const axios = require("axios");
+
+// Admin API for fetching metafields
+const adminAPI = axios.create({
+  baseURL: `https://${process.env.SHOPIFY_STORE_URL}/admin/api/2025-01`,
+  headers: {
+    "X-Shopify-Access-Token": process.env.SHOPIFY_ADMIN_ACCESS_TOKEN,
+    "Content-Type": "application/json",
+  },
+});
 
 /**
  * GET /blogs
@@ -40,7 +50,36 @@ router.get("/", async (req, res) => {
     if (response.data.errors) {
       throw new Error(response.data.errors[0].message);
     }
-    const blogs = response.data.data.blogs.edges.map(edge => edge.node);
+    
+    // Fetch metafields for each article using Admin API REST
+    const blogs = await Promise.all(response.data.data.blogs.edges.map(async (edge) => {
+      const articlesWithMetafields = await Promise.all(edge.node.articles.edges.map(async (articleEdge) => {
+        const articleId = articleEdge.node.id.split('/').pop();
+        let metafields = [];
+        
+        try {
+          const metafieldsResponse = await adminAPI.get(`/articles/${articleId}/metafields.json`);
+          metafields = metafieldsResponse.data.metafields || [];
+        } catch (err) {
+          console.log(`Could not fetch metafields for article ${articleId}`);
+        }
+        
+        return {
+          node: {
+            ...articleEdge.node,
+            metafields
+          }
+        };
+      }));
+      
+      return {
+        ...edge.node,
+        articles: {
+          edges: articlesWithMetafields
+        }
+      };
+    }));
+    
     res.json({ success: true, data: blogs });
   } catch (error) {
     console.error("Error fetching blogs:", error.message);
@@ -92,7 +131,34 @@ router.get("/:blogHandle", async (req, res) => {
     if (!blog) {
       return res.status(404).json({ success: false, message: "Blog not found" });
     }
-    res.json({ success: true, data: blog });
+    
+    // Fetch metafields for each article using Admin API REST
+    const articlesWithMetafields = await Promise.all(blog.articles.edges.map(async (articleEdge) => {
+      const articleId = articleEdge.node.id.split('/').pop();
+      let metafields = [];
+      
+      try {
+        const metafieldsResponse = await adminAPI.get(`/articles/${articleId}/metafields.json`);
+        metafields = metafieldsResponse.data.metafields || [];
+      } catch (err) {
+        console.log(`Could not fetch metafields for article ${articleId}`);
+      }
+      
+      return {
+        node: {
+          ...articleEdge.node,
+          metafields
+        }
+      };
+    }));
+    
+    const formattedBlog = {
+      ...blog,
+      articles: {
+        edges: articlesWithMetafields
+      }
+    };
+    res.json({ success: true, data: formattedBlog });
   } catch (error) {
     console.error("Error fetching blog details:", error.message);
     res.status(500).json({ success: false, message: "Failed to fetch blog details", error: error.message });
@@ -147,7 +213,23 @@ router.get("/:blogHandle/articles/:articleHandle", async (req, res) => {
     if (!article) {
       return res.status(404).json({ success: false, message: "Article not found" });
     }
-    res.json({ success: true, data: article });
+    
+    // Fetch metafields for the article using Admin API REST
+    const articleId = article.id.split('/').pop();
+    let metafields = [];
+    
+    try {
+      const metafieldsResponse = await adminAPI.get(`/articles/${articleId}/metafields.json`);
+      metafields = metafieldsResponse.data.metafields || [];
+    } catch (err) {
+      console.log(`Could not fetch metafields for article ${articleId}`);
+    }
+    
+    const formattedArticle = {
+      ...article,
+      metafields
+    };
+    res.json({ success: true, data: formattedArticle });
   } catch (error) {
     console.error("Error fetching article details:", error.message);
     res.status(500).json({ success: false, message: "Failed to fetch article details", error: error.message });
