@@ -13,6 +13,7 @@ const collectionsRoutes = require("./routes/collections");
 const searchRoutes = require("./routes/search");
 const ordersRoutes = require("./routes/orders");
 const wishlistRoutes = require("./routes/wishlist");
+const metaobjectsRoutes = require("./routes/metaobjects");
 
 // CORS Middleware
 app.use(cors({
@@ -41,6 +42,7 @@ app.use("/collections", collectionsRoutes);
 app.use("/search", searchRoutes);
 app.use("/orders", ordersRoutes);
 app.use("/wishlist", wishlistRoutes);
+app.use("/metaobjects", metaobjectsRoutes);
 
 // Start server (for local development)
 if (process.env.NODE_ENV !== 'production') {
