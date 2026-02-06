@@ -2,20 +2,10 @@ const express = require("express");
 const router = express.Router();
 const verifyToken = require("../middleware/auth");
 const storefrontAPI = require("../config/shopify");
-const axios = require("axios");
-
-// Admin API instance for fetching metafields
-const adminAPI = axios.create({
-  baseURL: `https://${process.env.SHOPIFY_STORE_URL}/admin/api/2025-01`,
-  headers: {
-    "X-Shopify-Access-Token": process.env.SHOPIFY_ADMIN_ACCESS_TOKEN,
-    "Content-Type": "application/json",
-  },
-});
 
 /**
  * GET /search/:query or /search/:query/pg-:page
- * Search for products using Shopify Storefront API GraphQL search query
+ * Search for products using Shopify Storefront API predictive search
  * Requires Bearer token
  */
 router.get("/:query/pg-:page", verifyToken, async (req, res) => {
@@ -28,11 +18,35 @@ router.get("/:query", verifyToken, async (req, res) => {
   return handleSearchRequest(req, res);
 });
 
+/**
+ * Build search query variants for better fuzzy matching
+ * Handles cases like "peribottle" -> "peri bottle", "peribottl" -> "peri bottl"
+ */
+function buildSearchVariants(rawQuery) {
+  const normalized = rawQuery.trim().toLowerCase();
+  const variants = [normalized];
+
+  // If no spaces, try splitting into common word patterns
+  if (!normalized.includes(" ") && normalized.length >= 4) {
+    // Try splitting at each position (min 2 chars each side)
+    for (let i = 2; i <= normalized.length - 2; i++) {
+      variants.push(`${normalized.slice(0, i)} ${normalized.slice(i)}`);
+    }
+  }
+
+  // If has spaces, also try without spaces
+  if (normalized.includes(" ")) {
+    variants.push(normalized.replace(/\s+/g, ""));
+  }
+
+  return variants;
+}
+
 async function handleSearchRequest(req, res) {
   try {
     const { query, pageNumber } = req.params;
     const page = parseInt(pageNumber) || 1;
-    const productsPerPage = parseInt(req.query.limit) || 24;
+    const productsPerPage = Math.min(parseInt(req.query.limit) || 8, 8);
     
     if (!query || query.trim() === "") {
       return res.status(400).json({
@@ -41,122 +55,70 @@ async function handleSearchRequest(req, res) {
       });
     }
 
-    console.log(`Searching for: "${query}" (page ${page})`);
+    // Generate search variants for fuzzy matching
+    const searchVariants = buildSearchVariants(query);
+    console.log(`Predictive search for: "${query}" variants: ${JSON.stringify(searchVariants)}`);
 
-    // Build the GraphQL search query
     const searchQuery = `
-      query searchProducts($query: String!, $first: Int!) {
-        search(query: $query, first: $first, types: PRODUCT, sortKey: RELEVANCE) {
-          totalCount
-          edges {
-            cursor
-            node {
-              ... on Product {
-                id
-                title
-                handle
-                description
-                descriptionHtml
-                productType
-                vendor
-                tags
-                createdAt
-                updatedAt
-                publishedAt
-                availableForSale
-                totalInventory
-                priceRange {
-                  minVariantPrice {
-                    amount
-                    currencyCode
-                  }
-                  maxVariantPrice {
-                    amount
-                    currencyCode
-                  }
-                }
-                compareAtPriceRange {
-                  minVariantPrice {
-                    amount
-                    currencyCode
-                  }
-                  maxVariantPrice {
-                    amount
-                    currencyCode
-                  }
-                }
-                images(first: 10) {
-                  edges {
-                    node {
-                      id
-                      url
-                      altText
-                      width
-                      height
-                    }
-                  }
-                }
-                variants(first: 50) {
-                  edges {
-                    node {
-                      id
-                      title
-                      sku
-                      availableForSale
-                      requiresShipping
-                      weight
-                      weightUnit
-                      quantityAvailable
-                      price {
-                        amount
-                        currencyCode
-                      }
-                      compareAtPrice {
-                        amount
-                        currencyCode
-                      }
-                      selectedOptions {
-                        name
-                        value
-                      }
-                      image {
-                        id
-                        url
-                        altText
-                      }
-                    }
-                  }
-                }
-                options {
-                  id
-                  name
-                  values
-                }
-                seo {
-                  title
-                  description
-                }
+      query searchProducts($query: String!) {
+        predictiveSearch(
+          query: $query
+          limit: 8
+          types: [PRODUCT]
+        ) {
+          products {
+            id
+            title
+            handle
+            vendor
+            productType
+            priceRange {
+              minVariantPrice {
+                amount
+                currencyCode
               }
             }
-          }
-          pageInfo {
-            hasNextPage
-            hasPreviousPage
+            images(first: 1) {
+              nodes {
+                url
+                altText
+              }
+            }
           }
         }
       }
     `;
 
-    // Calculate how many products to fetch for pagination
-    const first = page * productsPerPage;
+    // Try each search variant until we get results
+    let searchResponse = null;
+    let lastResponse = null;
 
-    const searchResponse = await storefrontAPI.post("", {
-      query: searchQuery,
-      variables: { 
-        query: query,
-        first: first
+    for (const variant of searchVariants) {
+      const response = await storefrontAPI.post("", {
+        query: searchQuery,
+        variables: {
+          query: variant,
+        },
+      });
+
+      lastResponse = response;
+
+      if (response.data.errors) {
+        continue;
       }
-    });
+
+      const products = response.data.data?.predictiveSearch?.products || [];
+      if (products.length > 0) {
+        searchResponse = response;
+        console.log(`Found ${products.length} results with variant: "${variant}"`);
+        break;
+      }
+    }
+
+    // Use last response if no variant returned results
+    if (!searchResponse) {
+      searchResponse = lastResponse;
+    }
 
     if (searchResponse.data.errors) {
       console.error("GraphQL errors:", searchResponse.data.errors);
@@ -167,62 +129,10 @@ async function handleSearchRequest(req, res) {
       });
     }
 
-    const searchData = searchResponse.data.data.search;
-    const totalCount = searchData.totalCount;
-    const allEdges = searchData.edges || [];
-
-    // Paginate results
-    const offset = (page - 1) * productsPerPage;
-    const paginatedEdges = allEdges.slice(offset, offset + productsPerPage);
-
-    const totalPages = Math.ceil(totalCount / productsPerPage);
-    const hasNextPage = page < totalPages;
-    const hasPreviousPage = page > 1;
-
-    console.log(`Found ${totalCount} total results, returning ${paginatedEdges.length} for page ${page}`);
-
-    // Fetch metafields for each product using Admin API
-    const metafieldPromises = paginatedEdges.map(edge => {
-      const productId = edge.node.id.split('/').pop();
-      return adminAPI.get(`/products/${productId}/metafields.json?limit=250`)
-        .then(res => res.data.metafields || [])
-        .catch(err => []);
-    });
-    
-    const allMetafields = await Promise.all(metafieldPromises);
-
-    // Transform products to include metafields
-    const productsWithMetafields = paginatedEdges.map((edge, index) => {
-      const product = edge.node;
-      const metafields = allMetafields[index] || [];
-      
-      return {
-        ...product,
-        metafields: metafields.length > 0 ? metafields.map(mf => ({
-          id: mf.id,
-          namespace: mf.namespace,
-          key: mf.key,
-          value: mf.value || '',
-          type: mf.type || mf.value_type,
-          description: mf.description || null,
-        })) : [],
-      };
-    });
-
+    const products = searchResponse.data.data?.predictiveSearch?.products || [];
     res.json({
-      success: true,
-      query: query,
-      pageInfo: {
-        currentPage: page,
-        totalPages: totalPages,
-        productsPerPage: productsPerPage,
-        totalResults: totalCount,
-        hasNextPage: hasNextPage,
-        hasPreviousPage: hasPreviousPage,
-        startCursor: offset + 1,
-        endCursor: offset + paginatedEdges.length,
-      },
-      data: productsWithMetafields,
+      totalResults: products.length,
+      ...searchResponse.data,
     });
   } catch (error) {
     console.error("Error searching products:", error.message);
