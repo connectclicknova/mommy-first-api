@@ -2,6 +2,7 @@ const express = require("express");
 const router = express.Router();
 const axios = require("axios");
 const verifyToken = require("../middleware/auth");
+const {PLPProductByCollection, PLPProducts} = require("../grapghQuery/PLPProducts");
 
 // Admin API instance
 const adminAPI = axios.create({
@@ -11,6 +12,71 @@ const adminAPI = axios.create({
     "Content-Type": "application/json",
   },
 });
+
+function buildFilters(q) {
+  const filters = [];
+
+  if (q.minPrice || q.maxPrice) {
+    filters.push({
+      price: {
+        min: Number(q.minPrice || 0),
+        max: Number(q.maxPrice || 999999)
+      }
+    });
+  }
+
+  if (q.available) {
+    filters.push({ available: q.available === "true" });
+  }
+
+  if (q.productType) {
+    filters.push({ productType: q.productType });
+  }
+
+  return filters;
+}
+
+
+function buildQueryFromShopifyFilters(inputs = []) {
+
+  const parts = [];
+
+  inputs.forEach(str => {
+    const f = typeof str === "string" ? JSON.parse(str) : str;
+
+    // Availability
+    if (f.available !== undefined) {
+      parts.push(`available_for_sale:${f.available}`);
+    }
+
+    // Price Range
+    if (f.price) {
+      if (f.price.min != null)
+        parts.push(`variants.price:>=${f.price.min}`);
+
+      if (f.price.max != null)
+        parts.push(`variants.price:<=${f.price.max}`);
+    }
+
+    // Product Type
+    if (f.productType) {
+      parts.push(`product_type:"${f.productType}"`);
+    }
+
+    // Vendor
+    if (f.productVendor) {
+      parts.push(`vendor:"${f.productVendor}"`);
+    }
+
+    // Tag
+    if (f.tag) {
+      parts.push(`tag:"${f.tag}"`);
+    }
+
+  });
+
+  return parts.join(" AND ");
+}
 
 /**
  * GET /collections
@@ -895,5 +961,79 @@ router.post("/:collectionHandle/filter", verifyToken, async (req, res) => {
     });
   }
 });
+
+/**
+ * POST /collections/:collectionHandle/filter (using Storefront API)
+ * Filter products in a collection based on multiple criteria using Storefront API
+ * Supports: price, productType, availability, tags, variantOption
+ * {
+  "handle": "maternity",
+  "limit": 12,
+  "afterCursor": null,
+  "sortBy": "best_selling",
+  "reverse": false,
+  "filters": [
+    {
+      "price": { "min": 10, "max": 100 }
+    },
+    {
+      "productType": "Shoes"
+    },
+    {
+      "available": false
+    }
+  ]
+}
+
+ */
+router.post("/v2/:collectionHandle", verifyToken, async (req, res) => {
+  // using storefront API
+  const storefrontAPI = require("../config/shopify");
+
+  try {
+
+    const { collectionHandle } = req.params;
+    const { filters = [], limit = 24, sortBy = "best_selling", afterCursor = null, reverse = false } = req.body;
+
+    const variables = {
+      handle: collectionHandle,
+      first: Number(limit || 24),
+      after: afterCursor,
+      sortKey: sortBy,
+      reverse: reverse,
+      filters: filters
+    };
+
+    const response = await storefrontAPI.post("", {
+      query: PLPProductByCollection,
+      variables
+    });
+
+    if (!response.data?.data?.collection) {
+      return res.status(404).json({
+        success: false,
+        message: "Collection not found",
+      });
+    }
+
+    res.json({
+      success: true,
+      collection: {
+        ...response.data.data.collection,
+      }
+    });
+  } catch (error) {
+    console.error("Error filtering collection products:", error.message);
+    if (error.response?.data) {
+      console.error("API errors:", JSON.stringify(error.response.data, null, 2));
+    }
+    res.status(500).json({
+      success: false,
+      message: "Failed to filter collection products",
+      error: error.message,
+    });
+  }
+})
+
 
 module.exports = router;
