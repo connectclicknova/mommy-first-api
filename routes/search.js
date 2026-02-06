@@ -63,8 +63,8 @@ async function handleSearchRequest(req, res) {
       query searchProducts($query: String!) {
         predictiveSearch(
           query: $query
-          limit: 8
-          types: [PRODUCT]
+          limit: 10
+          types: [PRODUCT, ARTICLE]
         ) {
           products {
             id
@@ -83,6 +83,23 @@ async function handleSearchRequest(req, res) {
                 url
                 altText
               }
+            }
+          }
+          articles {
+            id
+            title
+            handle
+            content
+            excerpt
+            publishedAt
+            image {
+              url
+              altText
+            }
+            blog {
+              id
+              title
+              handle
             }
           }
         }
@@ -108,9 +125,10 @@ async function handleSearchRequest(req, res) {
       }
 
       const products = response.data.data?.predictiveSearch?.products || [];
-      if (products.length > 0) {
+      const articles = response.data.data?.predictiveSearch?.articles || [];
+      if (products.length > 0 || articles.length > 0) {
         searchResponse = response;
-        console.log(`Found ${products.length} results with variant: "${variant}"`);
+        console.log(`Found ${products.length} products and ${articles.length} articles with variant: "${variant}"`);
         break;
       }
     }
@@ -130,9 +148,33 @@ async function handleSearchRequest(req, res) {
     }
 
     const products = searchResponse.data.data?.predictiveSearch?.products || [];
+    const articles = searchResponse.data.data?.predictiveSearch?.articles || [];
+
+    // Group articles by blog handle and limit to 8 per blog
+    const blogHandles = ["events", "journals", "live-sesions"];
+    const articlesByBlog = {};
+    
+    blogHandles.forEach((handle) => {
+      articlesByBlog[handle] = articles
+        .filter((article) => article.blog?.handle === handle)
+        .slice(0, 8);
+    });
+
+    const totalArticlesByBlog = Object.values(articlesByBlog).reduce(
+      (sum, arr) => sum + arr.length,
+      0
+    );
+
     res.json({
-      totalResults: products.length,
-      ...searchResponse.data,
+      totalResults: products.length + totalArticlesByBlog,
+      totalProducts: products.length,
+      totalArticles: totalArticlesByBlog,
+      data: {
+        predictiveSearch: {
+          products: products,
+          articles: articlesByBlog,
+        },
+      },
     });
   } catch (error) {
     console.error("Error searching products:", error.message);
