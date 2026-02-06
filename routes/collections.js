@@ -2,6 +2,16 @@ const express = require("express");
 const router = express.Router();
 const storefrontAPI = require("../config/shopify");
 const verifyToken = require("../middleware/auth");
+const axios = require("axios");
+
+// Admin API instance for fetching metafields
+const adminAPI = axios.create({
+  baseURL: `https://${process.env.SHOPIFY_STORE_URL}/admin/api/2025-01`,
+  headers: {
+    "X-Shopify-Access-Token": process.env.SHOPIFY_ADMIN_ACCESS_TOKEN,
+    "Content-Type": "application/json",
+  },
+});
 
 /**
  * GET /collections
@@ -40,7 +50,46 @@ router.get("/", verifyToken, async (req, res) => {
       variables: { first: limit },
     });
 
-    res.json(response.data);
+    // Fetch metafields for each collection using Admin API
+    const collections = response.data?.data?.collections?.edges || [];
+    
+    const collectionsWithMetafields = await Promise.all(
+      collections.map(async (edge) => {
+        const collectionId = edge.node.id.split("/").pop();
+        try {
+          const metafieldsRes = await adminAPI.get(`/collections/${collectionId}/metafields.json?limit=250`);
+          const metafields = metafieldsRes.data.metafields || [];
+          return {
+            ...edge,
+            node: {
+              ...edge.node,
+              metafields: metafields.map((mf) => ({
+                namespace: mf.namespace,
+                key: mf.key,
+                value: mf.value,
+                type: mf.type,
+              })),
+            },
+          };
+        } catch (err) {
+          return {
+            ...edge,
+            node: {
+              ...edge.node,
+              metafields: [],
+            },
+          };
+        }
+      })
+    );
+
+    res.json({
+      data: {
+        collections: {
+          edges: collectionsWithMetafields,
+        },
+      },
+    });
   } catch (error) {
     console.error("Error fetching collections:", error.message);
     res.status(500).json({
