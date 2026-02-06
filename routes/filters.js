@@ -227,18 +227,25 @@ router.get("/:collectionHandle", verifyToken, async (req, res) => {
 
     // Determine sort key and direction
     const sortMapping = {
+      // Featured / Manual collection order
+      FEATURED: { key: "MANUAL", reverse: false },
+      // Best selling
       BEST_SELLING: { key: "BEST_SELLING", reverse: false },
-      CREATED: { key: "CREATED", reverse: false },
-      CREATED_DESC: { key: "CREATED", reverse: true },
-      PRICE: { key: "PRICE", reverse: false },
-      PRICE_DESC: { key: "PRICE", reverse: true },
-      TITLE: { key: "TITLE", reverse: false },
+      // Alphabetically A-Z
+      TITLE_ASC: { key: "TITLE", reverse: false },
+      // Alphabetically Z-A
       TITLE_DESC: { key: "TITLE", reverse: true },
-      RELEVANCE: { key: "RELEVANCE", reverse: false },
-      MANUAL: { key: "MANUAL", reverse: false },
+      // Price low to high
+      PRICE_ASC: { key: "PRICE", reverse: false },
+      // Price high to low
+      PRICE_DESC: { key: "PRICE", reverse: true },
+      // Date old to new
+      DATE_ASC: { key: "CREATED", reverse: false },
+      // Date new to old
+      DATE_DESC: { key: "CREATED", reverse: true },
     };
 
-    const sortConfig = sortMapping[sort.toUpperCase()] || sortMapping.BEST_SELLING;
+    const sortConfig = sortMapping[sort.toUpperCase()] || sortMapping.FEATURED;
 
     const variables = {
       handle: collectionHandle,
