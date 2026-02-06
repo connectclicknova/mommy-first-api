@@ -103,6 +103,17 @@ router.get("/", verifyToken, async (req, res) => {
 /**
  * GET /collections/:collectionHandle or /collections/:collectionHandle/pg-:page
  * Fetch products from a collection with pagination (24 per page)
+ * Supports filtering and sorting via query params:
+ *   - price_min: minimum price
+ *   - price_max: maximum price
+ *   - vendor: product vendor (comma-separated for multiple)
+ *   - product_type: product type (comma-separated for multiple)
+ *   - tag: product tag (comma-separated for multiple)
+ *   - available: true/false for availability
+ *   - color: color option filter (comma-separated for multiple)
+ *   - size: size option filter (comma-separated for multiple)
+ *   - option: custom variant option in format "name:value" (comma-separated for multiple)
+ *   - sort: FEATURED, BEST_SELLING, TITLE_ASC, TITLE_DESC, PRICE_ASC, PRICE_DESC, DATE_ASC, DATE_DESC
  * Returns total count and remaining products count
  * Requires Bearer token
  */
@@ -122,9 +133,109 @@ async function handleCollectionRequest(req, res) {
     const page = parseInt(pageNumber) || 1;
     const productsPerPage = 24;
 
-    // First get total count
+    // Get filter and sort params
+    const {
+      price_min,
+      price_max,
+      vendor,
+      product_type,
+      tag,
+      available,
+      color,
+      size,
+      option,
+      sort = "FEATURED",
+    } = req.query;
+
+    // Build filter array for Shopify
+    const filters = [];
+
+    // Price filter
+    if (price_min || price_max) {
+      const priceFilter = { price: {} };
+      if (price_min) priceFilter.price.min = parseFloat(price_min);
+      if (price_max) priceFilter.price.max = parseFloat(price_max);
+      filters.push(priceFilter);
+    }
+
+    // Availability filter
+    if (available !== undefined) {
+      filters.push({ available: available === "true" });
+    }
+
+    // Vendor filter (can be multiple comma-separated)
+    if (vendor) {
+      const vendors = vendor.split(",").map((v) => v.trim());
+      vendors.forEach((v) => {
+        filters.push({ productVendor: v });
+      });
+    }
+
+    // Product type filter (can be multiple comma-separated)
+    if (product_type) {
+      const types = product_type.split(",").map((t) => t.trim());
+      types.forEach((t) => {
+        filters.push({ productType: t });
+      });
+    }
+
+    // Tag filter (can be multiple comma-separated)
+    if (tag) {
+      const tags = tag.split(",").map((t) => t.trim());
+      tags.forEach((t) => {
+        filters.push({ tag: t });
+      });
+    }
+
+    // Color variant option filter
+    if (color) {
+      const colors = color.split(",").map((c) => c.trim());
+      colors.forEach((c) => {
+        filters.push({ variantOption: { name: "Color", value: c } });
+      });
+    }
+
+    // Size variant option filter
+    if (size) {
+      const sizes = size.split(",").map((s) => s.trim());
+      sizes.forEach((s) => {
+        filters.push({ variantOption: { name: "Size", value: s } });
+      });
+    }
+
+    // Custom variant option filter (format: "name:value")
+    if (option) {
+      const options = option.split(",").map((o) => o.trim());
+      options.forEach((o) => {
+        const [name, value] = o.split(":").map((p) => p.trim());
+        if (name && value) {
+          filters.push({ variantOption: { name, value } });
+        }
+      });
+    }
+
+    // Determine sort key and direction
+    const sortMapping = {
+      FEATURED: { key: "MANUAL", reverse: false },
+      BEST_SELLING: { key: "BEST_SELLING", reverse: false },
+      TITLE_ASC: { key: "TITLE", reverse: false },
+      TITLE_DESC: { key: "TITLE", reverse: true },
+      PRICE_ASC: { key: "PRICE", reverse: false },
+      PRICE_DESC: { key: "PRICE", reverse: true },
+      DATE_ASC: { key: "CREATED", reverse: false },
+      DATE_DESC: { key: "CREATED", reverse: true },
+    };
+
+    const sortConfig = sortMapping[sort.toUpperCase()] || sortMapping.FEATURED;
+
+    const hasFilters = filters.length > 0;
+    const hasSort = sort !== "FEATURED";
+
+    console.log(`Collection: ${collectionHandle}, Page: ${page}, Filters: ${JSON.stringify(filters)}, Sort: ${sort}`);
+
+    // Get total count with filters applied
     const countQuery = `
-      query getCollectionCount($handle: String!) {
+      query getCollectionCount($handle: String!, $filters: [ProductFilter!], $sortKey: ProductCollectionSortKeys!, $reverse: Boolean) {
         collection(handle: $handle) {
           id
           title
@@ -135,7 +246,7 @@ async function handleCollectionRequest(req, res) {
             url
             altText
           }
-          products(first: 1) {
+          products(first: 250, filters: $filters, sortKey: $sortKey, reverse: $reverse) {
             filters {
               id
               label
@@ -147,10 +258,6 @@ async function handleCollectionRequest(req, res) {
                 input
               }
             }
-          }
-        }
-        collectionByHandle: collection(handle: $handle) {
-          productsCount: products(first: 250) {
             edges {
               cursor
             }
@@ -161,7 +268,12 @@ async function handleCollectionRequest(req, res) {
 
     const countResponse = await storefrontAPI.post("", {
       query: countQuery,
-      variables: { handle: collectionHandle },
+      variables: {
+        handle: collectionHandle,
+        filters: hasFilters ? filters : null,
+        sortKey: sortConfig.key,
+        reverse: sortConfig.reverse,
+      },
     });
 
     if (!countResponse.data?.data?.collection) {
@@ -171,7 +283,7 @@ async function handleCollectionRequest(req, res) {
       });
     }
 
-    const totalProducts = countResponse.data.data.collectionByHandle?.productsCount?.edges?.length || 0;
+    const totalProducts = countResponse.data.data.collection?.products?.edges?.length || 0;
 
     // Calculate pagination
     const totalPages = Math.ceil(totalProducts / productsPerPage);
@@ -180,36 +292,18 @@ async function handleCollectionRequest(req, res) {
 
     // Fetch products for current page using cursor-based pagination
     let afterCursor = null;
-    
+
     if (page > 1) {
-      // Get cursor for the page
       const skipProducts = (page - 1) * productsPerPage;
-      const cursorQuery = `
-        query getCursors($handle: String!, $first: Int!) {
-          collection(handle: $handle) {
-            products(first: $first) {
-              edges {
-                cursor
-              }
-            }
-          }
-        }
-      `;
-      
-      const cursorResponse = await storefrontAPI.post("", {
-        query: cursorQuery,
-        variables: { handle: collectionHandle, first: skipProducts },
-      });
-      
-      const edges = cursorResponse.data?.data?.collection?.products?.edges || [];
-      if (edges.length > 0) {
-        afterCursor = edges[edges.length - 1].cursor;
+      const edges = countResponse.data.data.collection?.products?.edges || [];
+      if (edges.length >= skipProducts) {
+        afterCursor = edges[skipProducts - 1].cursor;
       }
     }
 
     // Fetch products for current page
     const productsQuery = `
-      query getCollectionProducts($handle: String!, $first: Int!, $after: String) {
+      query getCollectionProducts($handle: String!, $first: Int!, $after: String, $filters: [ProductFilter!], $sortKey: ProductCollectionSortKeys!, $reverse: Boolean) {
         collection(handle: $handle) {
           id
           title
@@ -220,7 +314,7 @@ async function handleCollectionRequest(req, res) {
             url
             altText
           }
-          products(first: $first, after: $after) {
+          products(first: $first, after: $after, filters: $filters, sortKey: $sortKey, reverse: $reverse) {
             edges {
               cursor
               node {
@@ -296,11 +390,32 @@ async function handleCollectionRequest(req, res) {
         handle: collectionHandle,
         first: productsPerPage,
         after: afterCursor,
+        filters: hasFilters ? filters : null,
+        sortKey: sortConfig.key,
+        reverse: sortConfig.reverse,
       },
     });
 
     const collection = countResponse.data.data.collection;
     const products = productsResponse.data?.data?.collection?.products || {};
+    const pageInfo = products.pageInfo || {};
+
+    // Fetch collection metafields using Admin API
+    let collectionMetafields = [];
+    try {
+      const collectionId = collection.id.split("/").pop();
+      const metafieldsRes = await adminAPI.get(`/collections/${collectionId}/metafields.json?limit=250`);
+      collectionMetafields = (metafieldsRes.data.metafields || []).map((mf) => ({
+        namespace: mf.namespace,
+        key: mf.key,
+        value: mf.value,
+        type: mf.type,
+      }));
+    } catch (err) {
+      console.error("Error fetching collection metafields:", err.message);
+    }
+
+    const productsList = products.edges || [];
 
     res.json({
       data: {
@@ -311,19 +426,35 @@ async function handleCollectionRequest(req, res) {
           description: collection.description,
           descriptionHtml: collection.descriptionHtml,
           image: collection.image,
+          metafields: collectionMetafields,
           filters: collection.products?.filters || [],
-          products: products,
+          products: productsList,
         },
+      },
+      appliedFilters: {
+        price_min: price_min || null,
+        price_max: price_max || null,
+        vendor: vendor || null,
+        product_type: product_type || null,
+        tag: tag || null,
+        available: available || null,
+        color: color || null,
+        size: size || null,
+        option: option || null,
+        sort: sort,
       },
       pagination: {
         currentPage: page,
         totalPages: totalPages,
         productsPerPage: productsPerPage,
         totalProducts: totalProducts,
+        currentPageProducts: productsList.length,
         displayedSoFar: Math.min(displayedSoFar, totalProducts),
         remainingProducts: remainingProducts,
-        hasNextPage: page < totalPages,
-        hasPreviousPage: page > 1,
+        hasNextPage: pageInfo.hasNextPage || page < totalPages,
+        hasPreviousPage: pageInfo.hasPreviousPage || page > 1,
+        startCursor: pageInfo.startCursor || null,
+        endCursor: pageInfo.endCursor || null,
       },
     });
   } catch (error) {
