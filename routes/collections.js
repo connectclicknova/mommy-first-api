@@ -417,6 +417,38 @@ async function handleCollectionRequest(req, res) {
 
     const productsList = products.edges || [];
 
+    // Fetch metafields for each product
+    const productsWithMetafields = await Promise.all(
+      productsList.map(async (edge) => {
+        const productId = edge.node.id.split("/").pop();
+        try {
+          const metafieldsRes = await adminAPI.get(`/products/${productId}/metafields.json?limit=250`);
+          const metafields = (metafieldsRes.data.metafields || []).map((mf) => ({
+            namespace: mf.namespace,
+            key: mf.key,
+            value: mf.value,
+            type: mf.type,
+          }));
+          return {
+            ...edge,
+            node: {
+              ...edge.node,
+              metafields: metafields,
+            },
+          };
+        } catch (err) {
+          console.error(`Error fetching metafields for product ${productId}:`, err.message);
+          return {
+            ...edge,
+            node: {
+              ...edge.node,
+              metafields: [],
+            },
+          };
+        }
+      })
+    );
+
     res.json({
       data: {
         collection: {
@@ -428,7 +460,7 @@ async function handleCollectionRequest(req, res) {
           image: collection.image,
           metafields: collectionMetafields,
           filters: collection.products?.filters || [],
-          products: productsList,
+          products: productsWithMetafields,
         },
       },
       appliedFilters: {
