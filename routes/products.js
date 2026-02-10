@@ -182,17 +182,25 @@ router.get("/:handle", verifyToken, async (req, res) => {
         description: mf.description || null,
       };
 
-      // If this is the bought_together product reference, fetch product details
+      // If this is the bought_together product reference, fetch product details and metafields
       if (mf.key === 'bought_together' && mf.type === 'product_reference' && mf.value) {
         try {
           const boughtTogetherProductId = mf.value.split('/').pop();
-          const boughtTogetherResponse = await adminAPI.get(`/products/${boughtTogetherProductId}.json?fields=id,title,images,variants`);
+          
+          // Fetch product details and metafields in parallel
+          const [boughtTogetherResponse, boughtTogetherMetafieldsResponse] = await Promise.all([
+            adminAPI.get(`/products/${boughtTogetherProductId}.json?fields=id,title,handle,images,variants`),
+            adminAPI.get(`/products/${boughtTogetherProductId}/metafields.json?limit=250`)
+          ]);
+          
           const boughtProduct = boughtTogetherResponse.data.product;
+          const boughtProductMetafields = boughtTogetherMetafieldsResponse.data.metafields || [];
           
           if (boughtProduct) {
             metafieldEntry.productDetails = {
               id: mf.value,
               title: boughtProduct.title,
+              handle: boughtProduct.handle,
               image: boughtProduct.images?.[0] ? {
                 id: boughtProduct.images[0].id,
                 url: boughtProduct.images[0].src,
@@ -203,6 +211,14 @@ router.get("/:handle", verifyToken, async (req, res) => {
                 currencyCode: "USD",
                 compareAtPrice: boughtProduct.variants[0].compare_at_price || null,
               } : null,
+              metafields: boughtProductMetafields.map(bmf => ({
+                id: bmf.id,
+                namespace: bmf.namespace,
+                key: bmf.key,
+                value: bmf.value || '',
+                type: bmf.type || bmf.value_type,
+                description: bmf.description || null,
+              })),
             };
           }
         } catch (boughtError) {
