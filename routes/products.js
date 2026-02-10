@@ -133,29 +133,103 @@ router.get("/:handle", verifyToken, async (req, res) => {
       });
     }
 
-    // Fetch metafields using Admin API
+    const productId = product.id.split('/').pop();
+
+    // Fetch metafields and inventory data using Admin API in parallel
     let metafields = [];
+    let inventoryData = {};
+    let totalAvailableQuantity = 0;
+
     try {
-      const productId = product.id.split('/').pop();
-      const metafieldsResponse = await adminAPI.get(`/products/${productId}/metafields.json?limit=250`);
+      const [metafieldsResponse, productAdminResponse] = await Promise.all([
+        adminAPI.get(`/products/${productId}/metafields.json?limit=250`),
+        adminAPI.get(`/products/${productId}.json`)
+      ]);
+
       metafields = metafieldsResponse.data.metafields || [];
+      
+      // Get variant inventory info from Admin API
+      const adminVariants = productAdminResponse.data.product?.variants || [];
+      const inventoryItemIds = adminVariants.map(v => v.inventory_item_id).filter(Boolean);
+      
+      if (inventoryItemIds.length > 0) {
+        // Fetch inventory levels for all inventory items
+        const inventoryResponse = await adminAPI.get(`/inventory_levels.json?inventory_item_ids=${inventoryItemIds.join(',')}`);
+        const inventoryLevels = inventoryResponse.data.inventory_levels || [];
+        
+        // Map inventory item id to total available quantity across all locations
+        adminVariants.forEach(variant => {
+          const variantInventory = inventoryLevels
+            .filter(il => il.inventory_item_id === variant.inventory_item_id)
+            .reduce((sum, il) => sum + (il.available || 0), 0);
+          inventoryData[variant.id] = variantInventory;
+          totalAvailableQuantity += variantInventory;
+        });
+      }
     } catch (metaError) {
-      console.error(`Error fetching metafields:`, metaError.message);
+      console.error(`Error fetching metafields/inventory:`, metaError.message);
     }
 
-    // Transform product data with metafields
-    const productData = {
-      ...product,
-      metafields: metafields.length > 0 ? metafields.map(mf => ({
+    // Process metafields and fetch bought_together product if exists
+    const processedMetafields = [];
+    for (const mf of metafields) {
+      const metafieldEntry = {
         id: mf.id,
         namespace: mf.namespace,
         key: mf.key,
         value: mf.value || '',
         type: mf.type || mf.value_type,
         description: mf.description || null,
-      })) : [],
+      };
+
+      // If this is the bought_together product reference, fetch product details
+      if (mf.key === 'bought_together' && mf.type === 'product_reference' && mf.value) {
+        try {
+          const boughtTogetherProductId = mf.value.split('/').pop();
+          const boughtTogetherResponse = await adminAPI.get(`/products/${boughtTogetherProductId}.json?fields=id,title,images,variants`);
+          const boughtProduct = boughtTogetherResponse.data.product;
+          
+          if (boughtProduct) {
+            metafieldEntry.productDetails = {
+              id: mf.value,
+              title: boughtProduct.title,
+              image: boughtProduct.images?.[0] ? {
+                id: boughtProduct.images[0].id,
+                url: boughtProduct.images[0].src,
+                altText: boughtProduct.images[0].alt || null,
+              } : null,
+              price: boughtProduct.variants?.[0] ? {
+                amount: boughtProduct.variants[0].price,
+                currencyCode: "USD",
+                compareAtPrice: boughtProduct.variants[0].compare_at_price || null,
+              } : null,
+            };
+          }
+        } catch (boughtError) {
+          console.error(`Error fetching bought_together product:`, boughtError.message);
+        }
+      }
+
+      processedMetafields.push(metafieldEntry);
+    }
+
+    // Transform variants with inventory quantity
+    const transformedVariants = product.variants.edges.map(v => {
+      const variant = v.node;
+      const variantNumericId = parseInt(variant.id.split('/').pop());
+      return {
+        ...variant,
+        availableQuantity: inventoryData[variantNumericId] || 0,
+      };
+    });
+
+    // Transform product data with metafields and inventory
+    const productData = {
+      ...product,
+      totalAvailableQuantity,
+      metafields: processedMetafields,
       images: product.images.edges.map(img => img.node),
-      variants: product.variants.edges.map(v => v.node),
+      variants: transformedVariants,
     };
 
     res.json({
