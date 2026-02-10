@@ -201,6 +201,7 @@ router.get("/:handle", verifyToken, async (req, res) => {
               id: mf.value,
               title: boughtProduct.title,
               handle: boughtProduct.handle,
+              variantId: boughtProduct.variants?.[0] ? `gid://shopify/ProductVariant/${boughtProduct.variants[0].id}` : null,
               image: boughtProduct.images?.[0] ? {
                 id: boughtProduct.images[0].id,
                 url: boughtProduct.images[0].src,
