@@ -76,6 +76,108 @@ async function getOrCreateUserCart(customerId, email = null) {
   }
 }
 
+// Common cart fragment for GraphQL queries
+const CART_FRAGMENT = `
+  fragment CartFields on Cart {
+    id
+    checkoutUrl
+    createdAt
+    updatedAt
+    discountCodes {
+      code
+      applicable
+    }
+    discountAllocations {
+      discountedAmount {
+        amount
+        currencyCode
+      }
+      ... on CartAutomaticDiscountAllocation {
+        title
+      }
+      ... on CartCodeDiscountAllocation {
+        code
+      }
+    }
+    lines(first: 100) {
+      edges {
+        node {
+          id
+          quantity
+          merchandise {
+            ... on ProductVariant {
+              id
+              title
+              priceV2 {
+                amount
+                currencyCode
+              }
+              compareAtPriceV2 {
+                amount
+                currencyCode
+              }
+              image {
+                url
+                altText
+              }
+              product {
+                id
+                title
+                handle
+                featuredImage {
+                  url
+                  altText
+                }
+              }
+            }
+          }
+          cost {
+            totalAmount {
+              amount
+              currencyCode
+            }
+            amountPerQuantity {
+              amount
+              currencyCode
+            }
+            compareAtAmountPerQuantity {
+              amount
+              currencyCode
+            }
+          }
+          discountAllocations {
+            discountedAmount {
+              amount
+              currencyCode
+            }
+            ... on CartAutomaticDiscountAllocation {
+              title
+            }
+            ... on CartCodeDiscountAllocation {
+              code
+            }
+          }
+        }
+      }
+    }
+    cost {
+      totalAmount {
+        amount
+        currencyCode
+      }
+      subtotalAmount {
+        amount
+        currencyCode
+      }
+      totalTaxAmount {
+        amount
+        currencyCode
+      }
+    }
+    totalQuantity
+  }
+`;
+
 /**
  * Create a new cart
  * @param {string} buyerIdentity - Customer access token or email (optional)
@@ -84,65 +186,11 @@ async function getOrCreateUserCart(customerId, email = null) {
 async function createCart(buyerIdentity = null) {
   try {
     const mutation = `
+      ${CART_FRAGMENT}
       mutation cartCreate($input: CartInput!) {
         cartCreate(input: $input) {
           cart {
-            id
-            checkoutUrl
-            createdAt
-            updatedAt
-            lines(first: 100) {
-              edges {
-                node {
-                  id
-                  quantity
-                  merchandise {
-                    ... on ProductVariant {
-                      id
-                      title
-                      priceV2 {
-                        amount
-                        currencyCode
-                      }
-                      image {
-                        url
-                        altText
-                      }
-                      product {
-                        id
-                        title
-                        handle
-                        featuredImage {
-                          url
-                          altText
-                        }
-                      }
-                    }
-                  }
-                  cost {
-                    totalAmount {
-                      amount
-                      currencyCode
-                    }
-                  }
-                }
-              }
-            }
-            cost {
-              totalAmount {
-                amount
-                currencyCode
-              }
-              subtotalAmount {
-                amount
-                currencyCode
-              }
-              totalTaxAmount {
-                amount
-                currencyCode
-              }
-            }
-            totalQuantity
+            ...CartFields
           }
           userErrors {
             field
@@ -194,64 +242,10 @@ async function createCart(buyerIdentity = null) {
 async function getCart(cartId) {
   try {
     const query = `
+      ${CART_FRAGMENT}
       query getCart($cartId: ID!) {
         cart(id: $cartId) {
-          id
-          checkoutUrl
-          createdAt
-          updatedAt
-          lines(first: 100) {
-            edges {
-              node {
-                id
-                quantity
-                merchandise {
-                  ... on ProductVariant {
-                    id
-                    title
-                    priceV2 {
-                      amount
-                      currencyCode
-                    }
-                    image {
-                      url
-                      altText
-                    }
-                    product {
-                      id
-                      title
-                      handle
-                      featuredImage {
-                        url
-                        altText
-                      }
-                    }
-                  }
-                }
-                cost {
-                  totalAmount {
-                    amount
-                    currencyCode
-                  }
-                }
-              }
-            }
-          }
-          cost {
-            totalAmount {
-              amount
-              currencyCode
-            }
-            subtotalAmount {
-              amount
-              currencyCode
-            }
-            totalTaxAmount {
-              amount
-              currencyCode
-            }
-          }
-          totalQuantity
+          ...CartFields
         }
       }
     `;
@@ -287,65 +281,11 @@ async function getCart(cartId) {
 async function addToCart(cartId, items) {
   try {
     const mutation = `
+      ${CART_FRAGMENT}
       mutation cartLinesAdd($cartId: ID!, $lines: [CartLineInput!]!) {
         cartLinesAdd(cartId: $cartId, lines: $lines) {
           cart {
-            id
-            checkoutUrl
-            createdAt
-            updatedAt
-            lines(first: 100) {
-              edges {
-                node {
-                  id
-                  quantity
-                  merchandise {
-                    ... on ProductVariant {
-                      id
-                      title
-                      priceV2 {
-                        amount
-                        currencyCode
-                      }
-                      image {
-                        url
-                        altText
-                      }
-                      product {
-                        id
-                        title
-                        handle
-                        featuredImage {
-                          url
-                          altText
-                        }
-                      }
-                    }
-                  }
-                  cost {
-                    totalAmount {
-                      amount
-                      currencyCode
-                    }
-                  }
-                }
-              }
-            }
-            cost {
-              totalAmount {
-                amount
-                currencyCode
-              }
-              subtotalAmount {
-                amount
-                currencyCode
-              }
-              totalTaxAmount {
-                amount
-                currencyCode
-              }
-            }
-            totalQuantity
+            ...CartFields
           }
           userErrors {
             field
@@ -391,65 +331,11 @@ async function addToCart(cartId, items) {
 async function updateCartItems(cartId, items) {
   try {
     const mutation = `
+      ${CART_FRAGMENT}
       mutation cartLinesUpdate($cartId: ID!, $lines: [CartLineUpdateInput!]!) {
         cartLinesUpdate(cartId: $cartId, lines: $lines) {
           cart {
-            id
-            checkoutUrl
-            createdAt
-            updatedAt
-            lines(first: 100) {
-              edges {
-                node {
-                  id
-                  quantity
-                  merchandise {
-                    ... on ProductVariant {
-                      id
-                      title
-                      priceV2 {
-                        amount
-                        currencyCode
-                      }
-                      image {
-                        url
-                        altText
-                      }
-                      product {
-                        id
-                        title
-                        handle
-                        featuredImage {
-                          url
-                          altText
-                        }
-                      }
-                    }
-                  }
-                  cost {
-                    totalAmount {
-                      amount
-                      currencyCode
-                    }
-                  }
-                }
-              }
-            }
-            cost {
-              totalAmount {
-                amount
-                currencyCode
-              }
-              subtotalAmount {
-                amount
-                currencyCode
-              }
-              totalTaxAmount {
-                amount
-                currencyCode
-              }
-            }
-            totalQuantity
+            ...CartFields
           }
           userErrors {
             field
@@ -495,65 +381,11 @@ async function updateCartItems(cartId, items) {
 async function removeFromCart(cartId, lineIds) {
   try {
     const mutation = `
+      ${CART_FRAGMENT}
       mutation cartLinesRemove($cartId: ID!, $lineIds: [ID!]!) {
         cartLinesRemove(cartId: $cartId, lineIds: $lineIds) {
           cart {
-            id
-            checkoutUrl
-            createdAt
-            updatedAt
-            lines(first: 100) {
-              edges {
-                node {
-                  id
-                  quantity
-                  merchandise {
-                    ... on ProductVariant {
-                      id
-                      title
-                      priceV2 {
-                        amount
-                        currencyCode
-                      }
-                      image {
-                        url
-                        altText
-                      }
-                      product {
-                        id
-                        title
-                        handle
-                        featuredImage {
-                          url
-                          altText
-                        }
-                      }
-                    }
-                  }
-                  cost {
-                    totalAmount {
-                      amount
-                      currencyCode
-                    }
-                  }
-                }
-              }
-            }
-            cost {
-              totalAmount {
-                amount
-                currencyCode
-              }
-              subtotalAmount {
-                amount
-                currencyCode
-              }
-              totalTaxAmount {
-                amount
-                currencyCode
-              }
-            }
-            totalQuantity
+            ...CartFields
           }
           userErrors {
             field
@@ -592,6 +424,23 @@ async function removeFromCart(cartId, lineIds) {
  */
 function formatCartLineItem(line) {
   const merchandise = line.merchandise;
+  
+  // Format line-level discounts
+  const lineDiscounts = line.discountAllocations?.map(allocation => ({
+    type: allocation.title ? "automatic" : "code",
+    title: allocation.title || null,
+    code: allocation.code || null,
+    discountedAmount: {
+      amount: parseFloat(allocation.discountedAmount.amount),
+      currencyCode: allocation.discountedAmount.currencyCode,
+    },
+  })) || [];
+
+  const totalLineDiscount = lineDiscounts.reduce(
+    (sum, d) => sum + d.discountedAmount.amount,
+    0
+  );
+
   return {
     lineId: line.id,
     quantity: line.quantity,
@@ -602,6 +451,10 @@ function formatCartLineItem(line) {
         amount: parseFloat(merchandise.priceV2.amount),
         currencyCode: merchandise.priceV2.currencyCode,
       },
+      compareAtPrice: merchandise.compareAtPriceV2 ? {
+        amount: parseFloat(merchandise.compareAtPriceV2.amount),
+        currencyCode: merchandise.compareAtPriceV2.currencyCode,
+      } : null,
       image: merchandise.image
         ? {
           url: merchandise.image.url,
@@ -620,8 +473,28 @@ function formatCartLineItem(line) {
         }
         : null,
     },
+    cost: {
+      totalAmount: {
+        amount: parseFloat(line.cost.totalAmount.amount),
+        currencyCode: line.cost.totalAmount.currencyCode,
+      },
+      amountPerQuantity: line.cost.amountPerQuantity ? {
+        amount: parseFloat(line.cost.amountPerQuantity.amount),
+        currencyCode: line.cost.amountPerQuantity.currencyCode,
+      } : null,
+      compareAtAmountPerQuantity: line.cost.compareAtAmountPerQuantity ? {
+        amount: parseFloat(line.cost.compareAtAmountPerQuantity.amount),
+        currencyCode: line.cost.compareAtAmountPerQuantity.currencyCode,
+      } : null,
+    },
+    // Legacy field for backward compatibility
     lineCost: {
       amount: parseFloat(line.cost.totalAmount.amount),
+      currencyCode: line.cost.totalAmount.currencyCode,
+    },
+    discountAllocations: lineDiscounts,
+    totalDiscount: {
+      amount: totalLineDiscount,
       currencyCode: line.cost.totalAmount.currencyCode,
     },
   };
@@ -634,6 +507,39 @@ function formatCartLineItem(line) {
  */
 function formatCartResponse(cart) {
   const lines = cart.lines.edges.map((edge) => formatCartLineItem(edge.node));
+
+  // Format discount codes
+  const discountCodes = cart.discountCodes?.map(dc => ({
+    code: dc.code,
+    applicable: dc.applicable,
+  })) || [];
+
+  // Format cart-level discount allocations
+  const discountAllocations = cart.discountAllocations?.map(allocation => ({
+    type: allocation.title ? "automatic" : "code",
+    title: allocation.title || null,
+    code: allocation.code || null,
+    discountedAmount: {
+      amount: parseFloat(allocation.discountedAmount.amount),
+      currencyCode: allocation.discountedAmount.currencyCode,
+    },
+  })) || [];
+
+  // Calculate total discount amount (cart-level)
+  const totalDiscountAmount = discountAllocations.reduce(
+    (sum, d) => sum + d.discountedAmount.amount,
+    0
+  );
+
+  // Calculate line-level discounts total
+  const lineLevelDiscountTotal = lines.reduce(
+    (sum, line) => sum + (line.totalDiscount?.amount || 0),
+    0
+  );
+
+  // Separate automatic and code discounts
+  const automaticDiscounts = discountAllocations.filter(d => d.type === "automatic");
+  const codeDiscounts = discountAllocations.filter(d => d.type === "code");
 
   return {
     cartId: cart.id,
@@ -657,6 +563,24 @@ function formatCartResponse(cart) {
           currencyCode: cart.cost.totalTaxAmount.currencyCode,
         }
         : null,
+    },
+    discounts: {
+      codes: discountCodes,
+      allocations: discountAllocations,
+      automaticDiscounts,
+      codeDiscounts,
+      totalCartDiscount: {
+        amount: totalDiscountAmount,
+        currencyCode: cart.cost.totalAmount.currencyCode,
+      },
+      totalLineDiscount: {
+        amount: lineLevelDiscountTotal,
+        currencyCode: cart.cost.totalAmount.currencyCode,
+      },
+      totalDiscount: {
+        amount: totalDiscountAmount + lineLevelDiscountTotal,
+        currencyCode: cart.cost.totalAmount.currencyCode,
+      },
     },
   };
 }
